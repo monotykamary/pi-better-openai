@@ -175,6 +175,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   let footerTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
   let footerInstalled = false;
   let statusInstalled = false;
+  let statusWidgetInstalled = false;
   let contextUsageCached = false;
   let cachedContextUsage: ReturnType<ExtensionContext["getContextUsage"]>;
   let cachedContextLeafId: string | null | undefined;
@@ -1043,11 +1044,14 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
           const extensionStatuses = footerData.getExtensionStatuses?.();
           if (extensionStatuses?.size) {
-            const statusLine = Array.from(extensionStatuses.entries())
+            const statusLines = Array.from(extensionStatuses.entries())
               .sort(([a], [b]) => String(a).localeCompare(String(b)))
-              .map(([, text]) => sanitizeStatusText(String(text)))
-              .join(" ");
-            textLines.push(truncateToWidth(statusLine, footerTextWidth, theme.fg("dim", "...")));
+              .map(([, text]) => theme.fg("dim", sanitizeStatusText(String(text))));
+            textLines.push(
+              ...statusLines.map((line) =>
+                truncateToWidth(line, footerTextWidth, theme.fg("dim", "...")),
+              ),
+            );
           }
 
           const petLines = petController.renderPetLines(ctx, cfg, {
@@ -1104,6 +1108,24 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     statusInstalled = text !== undefined;
   }
 
+  function setStatusWidget(ctx: ExtensionContext, text: string | undefined): void {
+    if (!text && !statusWidgetInstalled) return;
+    ctx.ui.setWidget(
+      STATUS_KEY,
+      text
+        ? (_tui, theme) => ({
+            invalidate() {},
+            render(width: number): string[] {
+              const line = theme.fg("dim", sanitizeStatusText(text));
+              return [truncateToWidth(line, width, theme.fg("dim", "..."))];
+            },
+          })
+        : undefined,
+      { placement: "belowEditor" },
+    );
+    statusWidgetInstalled = text !== undefined;
+  }
+
   function updateFooter(ctx: ExtensionContext): void {
     const cfg = config(ctx);
 
@@ -1123,20 +1145,22 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
     if (cfg.footer.mode === "replace" || shouldRenderPet) {
       setStatus(ctx, undefined);
+      setStatusWidget(ctx, undefined);
       installFooter(ctx);
       return;
     }
 
     clearFooter(ctx);
+    setStatus(ctx, undefined);
 
     if (cfg.footer.mode === "off") {
-      setStatus(ctx, undefined);
+      setStatusWidget(ctx, undefined);
       return;
     }
 
     const fast = fastController.statusSegment(ctx, cfg);
     const usage = usageController.statusLine(ctx, cfg);
-    setStatus(ctx, [fast, usage].filter(Boolean).join(" | ") || undefined);
+    setStatusWidget(ctx, [fast, usage].filter(Boolean).join(" | ") || undefined);
   }
 
   pi.on("session_start", (_event, ctx) => {

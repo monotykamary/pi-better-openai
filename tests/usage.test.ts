@@ -140,6 +140,7 @@ async function createUsageHarness(options: {
       notify: vi.fn(),
       setFooter: vi.fn(),
       setStatus: vi.fn(),
+      setWidget: vi.fn(),
     },
     sessionManager: {
       getEntries: vi.fn(() => []),
@@ -429,17 +430,17 @@ describe("usage polling lifecycle", () => {
 
     await emit(harness, "session_start");
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() =>
-      expect(harness.ctx.ui.setStatus).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.stringContaining("Usage:"),
-      ),
-    );
+    await vi.waitFor(() => expect(harness.ctx.ui.setWidget).toHaveBeenCalled());
 
-    expect(harness.ctx.ui.setStatus).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.stringContaining("5h: 90%"),
+    const widgetFactory = vi.mocked(harness.ctx.ui.setWidget).mock.calls.at(-1)?.[1];
+    expect(widgetFactory).toEqual(expect.any(Function));
+    if (typeof widgetFactory !== "function") throw new Error("Expected a status widget factory");
+    const widget = widgetFactory(
+      {} as never,
+      { fg: (_color: string, value: string) => value } as never,
     );
+    expect(widget.render(200)[0]).toContain("Usage:");
+    expect(widget.render(200)[0]).toContain("5h: 90%");
     await emit(harness, "session_shutdown");
   });
 
@@ -598,6 +599,8 @@ describe("usage polling lifecycle", () => {
       expect.stringContaining("5h: 90%"),
       expect.anything(),
     );
-    expect(harness.ctx.ui.setStatus).toHaveBeenLastCalledWith(expect.any(String), undefined);
+    expect(harness.ctx.ui.setWidget).toHaveBeenLastCalledWith(expect.any(String), undefined, {
+      placement: "belowEditor",
+    });
   });
 });
