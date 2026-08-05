@@ -21,12 +21,14 @@ import {
 import {
   DEFAULT_CONFIG,
   DEFAULT_IMAGE_CONFIG,
+  DEFAULT_LIVE_CONFIG,
   DEFAULT_PET_CONFIG,
   DEFAULT_SUPPORTED_MODELS,
   PET_STATES,
   FOOTER_SETTING_DESCRIPTORS,
   USAGE_SETTING_DESCRIPTORS,
   IMAGE_SETTING_DESCRIPTORS,
+  LIVE_SETTING_DESCRIPTORS,
   PET_SETTING_DESCRIPTORS,
   FAST_SETTING_DESCRIPTORS,
   type SettingsOptionDescriptor,
@@ -49,6 +51,7 @@ import {
   readCodexAuth,
 } from "./src/usage.ts";
 import { registerOpenAIImage, _imageTest } from "./src/image.ts";
+import { registerOpenAILive } from "./src/live/index.ts";
 import {
   type CodexPetPackage,
   codexHome,
@@ -293,6 +296,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       "",
       `Image enabled: ${cfg.image.enabled}`,
       `Image default save: ${cfg.image.defaultSave}`,
+      `Live enabled: ${cfg.live.enabled}`,
+      `Live voice: ${cfg.live.voice}`,
       `Pet enabled: ${cfg.pets.enabled}`,
       `Pet slug: ${cfg.pets.slug || PET_EMPTY_VALUE}`,
       `Pet placement: ${cfg.pets.placement}`,
@@ -533,6 +538,10 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       : "disabled";
   }
 
+  function liveSettingsSummary(cfg: ResolvedConfig): string {
+    return cfg.live.enabled ? `enabled · ${cfg.live.voice}` : "disabled";
+  }
+
   function petSettingsSummary(cfg: ResolvedConfig): string {
     const selected = cfg.pets.slug || (cfg.pets.enabled ? "first ready" : PET_EMPTY_VALUE);
     const status = cfg.pets.enabled ? "enabled" : "disabled";
@@ -585,6 +594,10 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   function buildImageSettingsItems(cfg: ResolvedConfig): SettingsPickerItem[] {
     return settingsItemsFromDescriptors(IMAGE_SETTING_DESCRIPTORS, cfg);
+  }
+
+  function buildLiveSettingsItems(cfg: ResolvedConfig): SettingsPickerItem[] {
+    return settingsItemsFromDescriptors(LIVE_SETTING_DESCRIPTORS, cfg);
   }
 
   function buildDiagnosticsSettingsItems(
@@ -675,6 +688,19 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
             () => buildImageSettingsItems(config(ctx)),
             ctx,
             () => done(imageSettingsSummary(config(ctx))),
+          ),
+      },
+      {
+        id: "section.live",
+        label: "Live voice",
+        currentValue: liveSettingsSummary(cfg),
+        description: "Configure Codex-backed realtime voice mode.",
+        submenu: (_value, done) =>
+          settingsSubmenu(
+            "Live voice settings",
+            () => buildLiveSettingsItems(config(ctx)),
+            ctx,
+            () => done(liveSettingsSummary(config(ctx))),
           ),
       },
       {
@@ -828,6 +854,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   });
 
   registerOpenAIImage(pi, config);
+  registerOpenAILive(pi, config);
   registerOpenAIPets(pi, {
     wake: async (ctx, slug) => {
       const pets = await listCodexPets();
@@ -1273,6 +1300,7 @@ export const _test = {
   DEFAULT_SUPPORTED_MODELS,
   DEFAULT_CONFIG,
   DEFAULT_IMAGE_CONFIG,
+  DEFAULT_LIVE_CONFIG,
   DEFAULT_PET_CONFIG,
   SERVICE_TIER,
   configPaths,

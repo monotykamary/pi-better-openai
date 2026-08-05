@@ -1,6 +1,6 @@
 # pi-better-openai
 
-A pi extension for OpenAI subscription workflows: fast mode, usage visibility, footer polish, custom Codex pets, and image generation through `openai-codex` auth.
+A pi extension for OpenAI subscription workflows: fast mode, usage visibility, realtime voice, footer polish, custom Codex pets, and image generation through `openai-codex` auth.
 
 ## Install
 
@@ -9,18 +9,18 @@ Requires Node.js 22.19.0 or newer.
 Install from GitHub:
 
 ```bash
-pi install git:github.com/mattleong/pi-better-openai
+pi install git:github.com/monotykamary/pi-better-openai
 ```
 
 Or install from npm:
 
 ```bash
-pi install npm:pi-better-openai
+pi install npm:@monotykamary/pi-better-openai
 ```
 
 ## Authentication
 
-Usage display and image generation require pi's `openai-codex` OAuth credentials.
+Usage display, image generation, and live voice require pi's `openai-codex` OAuth credentials.
 
 1. In pi, run `/login openai-codex`.
 2. Verify subscription usage with `/openai-usage`, or open `/openai-settings` and check **Diagnostics**.
@@ -34,10 +34,12 @@ Usage display and image generation require pi's `openai-codex` OAuth credentials
 - Interactive settings picker via `/openai-settings`.
 - Footer customization for model, thinking, fast mode, usage, and token/cost context.
 - OpenAI image generation/editing through the `openai_image` tool and `/openai-image` command.
+- Codex-backed realtime voice through `/live`, with an animated microphone waveform and coding-task delegation into the active pi session.
 - Animated Codex custom pets rendered in the Better OpenAI footer.
 - Commands:
   - `/fast` toggles fast mode.
   - `/openai-image <prompt>` generates an image directly.
+  - `/live` starts or stops realtime voice mode. `Ctrl+Shift+L` is the keyboard toggle.
   - `/pets [help|list|wake [slug]|tuck|select <slug>]` renders or manages custom pets from `${CODEX_HOME:-~/.codex}/pets`.
   - `/openai-usage` shows current OpenAI subscription usage.
   - `/openai-settings` opens settings, diagnostics, and config details.
@@ -88,6 +90,10 @@ Example config:
     "outputFormat": "png",
     "timeoutMs": 180000
   },
+  "live": {
+    "enabled": true,
+    "voice": "sol"
+  },
   "pets": {
     "enabled": false,
     "slug": "",
@@ -102,6 +108,21 @@ Example config:
   }
 }
 ```
+
+## Live voice
+
+Run `/live` or press `Ctrl+Shift+L` to open the realtime voice panel. `Ctrl+L` remains pi's model selector, so the extension deliberately uses the shifted chord. While live mode has focus:
+
+- `Space` toggles microphone mute.
+- `Escape`, `Ctrl+C`, or `Ctrl+Shift+L` ends the call.
+- The waveform reacts to microphone RMS level and the panel footer shows connecting, listening, working, speaking, muted, or error state.
+- Streaming speech transcripts stay in the live panel. Coding and repository requests are delegated into the current pi agent session; normal tool and assistant output continues in the transcript, and the final result is spoken back through the live session.
+
+Choose the spoken voice under **Live voice** in `/openai-settings`. Supported values are `arbor`, `breeze`, `cove`, `ember`, `juniper`, `maple`, `sol`, `spruce`, and `vale`.
+
+Live mode requires interactive TUI mode, microphone/speaker access, `openai-codex` OAuth, and one of these native targets: macOS arm64/x64, Linux arm64/x64, or Windows x64. Standard `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` settings are honored for signaling and sideband traffic. Audio/WebRTC uses the MIT-licensed native platform packages from [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi). The adapted implementation is attributed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). On macOS, launchd-managed LocalTerm users should rerun `localterm install` after upgrading LocalTerm and allow its microphone prompt.
+
+The feature uses Codex Desktop's experimental `gpt-live-1-codex`/Quicksilver protocol rather than the public OpenAI Realtime API. Upstream protocol or entitlement changes may temporarily break it.
 
 ## Image generation
 
@@ -157,6 +178,10 @@ $hatch-pet create a new pet inspired by pi-better-openai
 ```
 
 Custom pets should end up in `${CODEX_HOME:-~/.codex}/pets/<pet-name>/` with `pet.json` and `spritesheet.webp`. The spritesheet must be a 1536×1872 atlas arranged as 8 columns by 9 animation rows. Animated footer rendering also requires a terminal image protocol supported by pi. Refresh custom pets in Codex settings and toggle the overlay with `/pet`.
+
+## Attribution
+
+[`pi-better-openai`](https://github.com/mattleong/pi-better-openai) was originally created by [Matt Leong](https://github.com/mattleong). This fork is maintained and published under the `@monotykamary` namespace while retaining Matt's authorship and the original Git history. Realtime voice adaptations have separate attribution in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## Screenshots
 

@@ -2,6 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { CONFIG_BASENAME, logPrefix } from "./identity.ts";
+import {
+  DEFAULT_LIVE_VOICE,
+  isLiveVoice,
+  LIVE_VOICE_VALUES,
+  type LiveVoice,
+} from "./live/voices.ts";
 import { piAgentDir } from "./paths.ts";
 
 export const FOOTER_MODES = ["replace", "status", "off"] as const;
@@ -61,6 +67,11 @@ export type ImageConfig = {
   timeoutMs?: number;
 };
 
+export type LiveConfig = {
+  enabled?: boolean;
+  voice?: LiveVoice;
+};
+
 export type PetConfig = {
   enabled?: boolean;
   slug?: string;
@@ -82,6 +93,7 @@ export interface ConfigFile {
   usage?: UsageConfig;
   footer?: FooterConfig;
   image?: ImageConfig;
+  live?: LiveConfig;
   pets?: PetConfig;
 }
 
@@ -103,6 +115,7 @@ export interface ResolvedConfig {
   usage: Required<UsageConfig>;
   footer: Required<FooterConfig>;
   image: Required<ImageConfig>;
+  live: Required<LiveConfig>;
   pets: Required<PetConfig>;
 }
 
@@ -123,6 +136,11 @@ export const DEFAULT_IMAGE_CONFIG: Required<ImageConfig> = {
   defaultSave: "project",
   outputFormat: "png",
   timeoutMs: 180_000,
+};
+
+export const DEFAULT_LIVE_CONFIG: Required<LiveConfig> = {
+  enabled: true,
+  voice: DEFAULT_LIVE_VOICE,
 };
 
 export const DEFAULT_PET_CONFIG: Required<PetConfig> = {
@@ -146,10 +164,11 @@ export const DEFAULT_CONFIG: ConfigFile = {
   usage: DEFAULT_USAGE_CONFIG,
   footer: DEFAULT_FOOTER_CONFIG,
   image: DEFAULT_IMAGE_CONFIG,
+  live: DEFAULT_LIVE_CONFIG,
   pets: DEFAULT_PET_CONFIG,
 };
 
-export type SettingsOptionSection = "root" | "usage" | "footer" | "image" | "pets";
+export type SettingsOptionSection = "root" | "usage" | "footer" | "image" | "live" | "pets";
 
 export type SettingsValueContext = {
   petEmptyValue?: string;
@@ -293,6 +312,29 @@ export const IMAGE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
   },
 ];
 
+export const LIVE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
+  {
+    id: "live.enabled",
+    section: "live",
+    key: "enabled",
+    label: "Live voice",
+    currentValue: (cfg) => String(cfg.live.enabled),
+    values: ["true", "false"],
+    description: "Allow /live to start a Codex-backed realtime voice session.",
+    parse: booleanSetting,
+  },
+  {
+    id: "live.voice",
+    section: "live",
+    key: "voice",
+    label: "Voice",
+    currentValue: (cfg) => cfg.live.voice,
+    values: LIVE_VOICE_VALUES,
+    description: "Voice used for realtime spoken responses.",
+    parse: stringSetting,
+  },
+];
+
 export const PET_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
   {
     id: "pets.enabled",
@@ -402,6 +444,7 @@ export const SETTINGS_OPTION_DESCRIPTORS: readonly SettingsOptionDescriptor[] = 
   ...FOOTER_SETTING_DESCRIPTORS,
   ...USAGE_SETTING_DESCRIPTORS,
   ...IMAGE_SETTING_DESCRIPTORS,
+  ...LIVE_SETTING_DESCRIPTORS,
   ...PET_SETTING_DESCRIPTORS,
 ];
 
@@ -501,6 +544,11 @@ export function readConfig(path: string): ConfigFile | undefined {
     )
       config.image.outputFormat = parsed.image.outputFormat as ImageOutputFormat;
     if (typeof parsed.image.timeoutMs === "number") config.image.timeoutMs = parsed.image.timeoutMs;
+  }
+  if (isRecord(parsed.live)) {
+    config.live = {};
+    if (typeof parsed.live.enabled === "boolean") config.live.enabled = parsed.live.enabled;
+    if (isLiveVoice(parsed.live.voice)) config.live.voice = parsed.live.voice;
   }
   if (isRecord(parsed.pets)) {
     config.pets = {};
@@ -644,6 +692,11 @@ export function resolveConfig(cwd: string): ResolvedConfig {
             DEFAULT_IMAGE_CONFIG.timeoutMs,
         ),
       ),
+    },
+    live: {
+      ...DEFAULT_LIVE_CONFIG,
+      ...globalConfig.live,
+      ...projectConfig.live,
     },
     pets: {
       ...DEFAULT_PET_CONFIG,

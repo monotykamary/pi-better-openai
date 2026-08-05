@@ -127,6 +127,7 @@ async function createUsageHarness(options: {
     }),
     registerTool: vi.fn(),
     registerMessageRenderer: vi.fn(),
+    registerShortcut: vi.fn(),
     sendMessage: vi.fn(),
     getFlag: vi.fn(() => false),
     getThinkingLevel: vi.fn(() => "off"),

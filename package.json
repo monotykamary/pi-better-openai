@@ -1,7 +1,7 @@
 {
-  "name": "pi-better-openai",
+  "name": "@monotykamary/pi-better-openai",
   "version": "0.1.22",
-  "description": "Personal pi extension that improves OpenAI with fast mode, usage stats, and footer polish.",
+  "description": "Improve OpenAI in pi with fast mode, usage stats, realtime voice, image generation, and footer polish.",
   "keywords": [
     "fast",
     "gpt",
@@ -11,18 +11,32 @@
     "pi-extension",
     "pi-package",
     "priority",
-    "service-tier"
+    "service-tier",
+    "voice",
+    "webrtc"
   ],
+  "homepage": "https://github.com/monotykamary/pi-better-openai#readme",
+  "bugs": {
+    "url": "https://github.com/monotykamary/pi-better-openai/issues"
+  },
   "license": "MIT",
+  "author": "monotykamary",
+  "contributors": [
+    {
+      "name": "Matt Leong",
+      "url": "https://github.com/mattleong"
+    }
+  ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mattleong/pi-better-openai.git"
+    "url": "git+https://github.com/monotykamary/pi-better-openai.git"
   },
   "files": [
     "index.ts",
     "src/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "type": "module",
   "publishConfig": {
@@ -32,18 +46,24 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "lint": "oxlint --deny-warnings .",
-    "lint:fix": "oxlint --fix .",
+    "lint": "oxlint --deny-warnings index.ts src/*.ts src/*/*.ts tests/*.ts",
+    "lint:fix": "oxlint --fix index.ts src/*.ts src/*/*.ts tests/*.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "sharp": "^0.34.5"
+    "https-proxy-agent": "9.1.0",
+    "proxy-from-env": "2.1.0",
+    "sharp": "0.35.3",
+    "undici": "8.10.0",
+    "ws": "8.21.2"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.6",
     "@earendil-works/pi-tui": "0.80.6",
     "@types/node": "~22.19.0",
+    "@types/proxy-from-env": "1.0.4",
+    "@types/ws": "8.18.1",
     "oxfmt": "^0.47.0",
     "oxlint": "^1.62.0",
     "typescript": "^6.0.3",
@@ -52,6 +72,16 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*"
+  },
+  "optionalDependencies": {
+    "@oh-my-pi/pi-natives-darwin-arm64": "17.2.9",
+    "@oh-my-pi/pi-natives-darwin-x64": "17.2.9",
+    "@oh-my-pi/pi-natives-linux-arm64": "17.2.9",
+    "@oh-my-pi/pi-natives-linux-x64": "17.2.9",
+    "@oh-my-pi/pi-natives-win32-x64": "17.2.9"
+  },
+  "overrides": {
+    "postcss": "8.5.25"
   },
   "engines": {
     "node": ">=22.19.0"

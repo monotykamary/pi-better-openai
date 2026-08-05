@@ -66,6 +66,7 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
     }),
     registerTool: vi.fn(),
     registerMessageRenderer: vi.fn(),
+    registerShortcut: vi.fn(),
     sendMessage: vi.fn(),
     getFlag: vi.fn(() => false),
     getThinkingLevel: vi.fn(() => "off"),

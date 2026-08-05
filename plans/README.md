@@ -1,6 +1,6 @@
 # Improvement plan status
 
-This index tracks the GitHub issue-backed improvement plans for this repository.
+This index tracks the GitHub issue-backed improvement plans completed in Matt Leong's original [`pi-better-openai`](https://github.com/mattleong/pi-better-openai) repository. The upstream issue links are retained as a historical record.
 
 | Plan                                                                         | Issue                                                          | Status |
 | ---------------------------------------------------------------------------- | -------------------------------------------------------------- | ------ |
