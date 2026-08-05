@@ -12,12 +12,12 @@
 Run the narrowest useful test first, then the full gate before committing:
 
 ```bash
-npm ci
-npm test -- tests/<file>.test.ts
-npm run check
+pnpm install --frozen-lockfile
+pnpm test -- tests/<file>.test.ts
+pnpm run check
 ```
 
-`npm run check` runs typecheck, lint, format check, and all tests. Do not skip it for code changes.
+`pnpm run check` runs typecheck, lint, format check, and all tests. Do not skip it for code changes.
 
 ## Coding conventions
 
@@ -28,7 +28,7 @@ npm run check
 
 ## Release and publishing
 
-The release workflow publishes to npm from GitHub releases or manual dispatch after `npm ci`, `npm run check`, and `npm audit --audit-level=high`. Do not publish, tag, or push release commits unless the maintainer explicitly instructs you to.
+The release workflow publishes to npm from GitHub releases or manual dispatch after `pnpm install --frozen-lockfile`, `pnpm run check`, and `pnpm audit --audit-level=high`. Do not publish, tag, or push release commits unless the maintainer explicitly instructs you to.
 
 ## Security reminders
 

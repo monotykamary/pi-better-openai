@@ -43,7 +43,7 @@
     "access": "public"
   },
   "scripts": {
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm test",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint --deny-warnings index.ts src/*.ts src/*/*.ts tests/*.ts",
@@ -80,12 +80,10 @@
     "@oh-my-pi/pi-natives-linux-x64": "17.2.9",
     "@oh-my-pi/pi-natives-win32-x64": "17.2.9"
   },
-  "overrides": {
-    "postcss": "8.5.25"
-  },
   "engines": {
     "node": ">=22.19.0"
   },
+  "packageManager": "pnpm@11.20.0",
   "pi": {
     "extensions": [
       "./index.ts"
