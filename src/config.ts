@@ -130,9 +130,11 @@ export const DEFAULT_FOOTER_CONFIG: Required<FooterConfig> = {
   mode: "replace",
 };
 
+export const DEFAULT_IMAGE_MODEL = "gpt-image-2";
+
 export const DEFAULT_IMAGE_CONFIG: Required<ImageConfig> = {
   enabled: true,
-  defaultModel: "gpt-5.5",
+  defaultModel: DEFAULT_IMAGE_MODEL,
   defaultSave: "project",
   outputFormat: "png",
   timeoutMs: 180_000,
@@ -276,8 +278,8 @@ export const IMAGE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     key: "defaultModel",
     label: "Image model",
     currentValue: (cfg) => cfg.image.defaultModel,
-    values: ["gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-5"],
-    description: "Mainline model used for image generation when current model is not openai-codex.",
+    values: ["gpt-image-2"],
+    description: "GPT Image model used by the standalone Codex Images API.",
     parse: stringSetting,
   },
   {
@@ -297,7 +299,7 @@ export const IMAGE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     label: "Image format",
     currentValue: (cfg) => cfg.image.outputFormat,
     values: IMAGE_OUTPUT_FORMATS,
-    description: "Generated image file format.",
+    description: "Returned image format (converted locally from the Codex PNG response).",
     parse: stringSetting,
   },
   {
@@ -502,6 +504,12 @@ export function readRawConfig(path: string): Record<string, unknown> {
   }
 }
 
+export function normalizeImageModel(value: string): string {
+  const trimmed = value.trim();
+  const model = trimmed.includes("/") ? trimmed.split("/").pop() || trimmed : trimmed;
+  return model.startsWith("gpt-5") ? DEFAULT_IMAGE_MODEL : model;
+}
+
 export function readConfig(path: string): ConfigFile | undefined {
   if (!existsSync(path)) return undefined;
   const parsed = readRawConfig(path);
@@ -532,7 +540,7 @@ export function readConfig(path: string): ConfigFile | undefined {
     config.image = {};
     if (typeof parsed.image.enabled === "boolean") config.image.enabled = parsed.image.enabled;
     if (typeof parsed.image.defaultModel === "string" && parsed.image.defaultModel.trim())
-      config.image.defaultModel = parsed.image.defaultModel.trim();
+      config.image.defaultModel = normalizeImageModel(parsed.image.defaultModel);
     if (
       typeof parsed.image.defaultSave === "string" &&
       (IMAGE_SAVE_MODES as readonly string[]).includes(parsed.image.defaultSave)

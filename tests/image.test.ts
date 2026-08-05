@@ -59,28 +59,18 @@ function createTempProject() {
   return cwd;
 }
 
-function sseResponse(events: unknown[], lineEnding = "\n"): Response {
-  const encoder = new TextEncoder();
+function codexImageResponse(data = "Zm9v", outputFormat = "png"): Response {
   return new Response(
-    new ReadableStream({
-      start(controller) {
-        for (const event of events) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(event)}${lineEnding}${lineEnding}`),
-          );
-        }
-        controller.close();
-      },
+    JSON.stringify({
+      created: 1_778_832_973,
+      background: "opaque",
+      data: [{ b64_json: data }],
+      output_format: outputFormat,
+      quality: "medium",
+      size: "1024x1024",
     }),
-    { headers: { "content-type": "text/event-stream" } },
+    { headers: { "content-type": "application/json" } },
   );
-}
-
-function finalImageEvent(id = "ig_test", data = "Zm9v") {
-  return {
-    type: "response.output_item.done",
-    item: { type: "image_generation_call", id, status: "completed", result: data },
-  };
 }
 
 async function writeTinyPng(path: string): Promise<void> {
@@ -209,38 +199,31 @@ describe("image helpers", () => {
     });
   });
 
-  test("extracts image generation results from response events", () => {
-    const extracted = _test.imageTest.extractImageFromEvent(
-      {
-        type: "response.output_item.done",
-        item: { type: "image_generation_call", id: "ig_1", status: "completed", result: "Zm9v" },
-      },
-      "image/png",
-    );
-    expect(extracted?.data).toBe("Zm9v");
-
-    const partial = _test.imageTest.extractImageFromEvent(
-      { partial_image_b64: "cGFydGlhbA==" },
-      "image/png",
-    );
-    expect(partial).toMatchObject({ status: "partial", data: "cGFydGlhbA==" });
-  });
-
-  test("builds image generation requests", () => {
+  test("builds standalone image generation requests", () => {
     expect(
       _test.imageTest.buildRequest(
         { prompt: "draw an otter" },
-        "gpt-5.5",
+        "gpt-image-2",
         makeResolvedConfig({ image: _test.DEFAULT_IMAGE_CONFIG }),
         [],
-      ).tool_choice,
-    ).toEqual({ type: "image_generation" });
+      ),
+    ).toEqual({
+      action: "generate",
+      endpoint: _test.imageTest.CODEX_IMAGE_GENERATIONS_URL,
+      body: {
+        prompt: "draw an otter",
+        background: "auto",
+        model: "gpt-image-2",
+        quality: "auto",
+        size: "auto",
+      },
+    });
   });
 });
 
 describe("openai_image tool execution", () => {
-  test("executes through the registered tool and sends a Codex image request", async () => {
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+  test("executes through the standalone Codex image generation endpoint", async () => {
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
     });
@@ -250,99 +233,95 @@ describe("openai_image tool execution", () => {
     expect(harness.tool.name).toBe("openai_image");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(_test.imageTest.CODEX_RESPONSES_URL);
+    expect(url).toBe(_test.imageTest.CODEX_IMAGE_GENERATIONS_URL);
     expect(init.headers).toMatchObject({
       authorization: "Bearer test-access",
       "chatgpt-account-id": "acct_test",
+      accept: "application/json",
+      "x-codex-image-turn-id": expect.any(String),
     });
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({
-      model: "gpt-5.5",
-      tool_choice: { type: "image_generation" },
+    expect(JSON.parse(String(init.body))).toEqual({
+      prompt: "draw an otter",
+      background: "auto",
+      model: "gpt-image-2",
+      quality: "auto",
+      size: "auto",
     });
-    expect(body.input).toMatchObject([
-      { role: "user", content: [{ type: "input_text", text: "draw an otter" }] },
-    ]);
     expect(result.content).toEqual([
       { type: "text", text: expect.stringContaining("Generated image") },
       { type: "image", data: "Zm9v", mimeType: "image/png" },
     ]);
-    expect(result.details).toMatchObject({ id: "ig_test", data: "Zm9v", savedPath: undefined });
-  });
-
-  test("waits for a final image_generation_call when partial image events arrive first", async () => {
-    stubFetch(
-      sseResponse([{ partial_image_b64: "cGFydGlhbA==" }, finalImageEvent("ig_final", "ZmluYWw=")]),
-    );
-    const harness = createImageHarness({
-      registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
-    });
-
-    const result = await executeImageTool(harness, { prompt: "draw", save: "none" });
-
-    expect(result.content).toContainEqual({
-      type: "image",
-      data: "ZmluYWw=",
-      mimeType: "image/png",
-    });
-    expect(result.details).toMatchObject({ id: "ig_final", data: "ZmluYWw=" });
-  });
-
-  test("accepts a done image item whose embedded status is still generating", async () => {
-    stubFetch(
-      sseResponse([
-        {
-          type: "response.image_generation_call.partial_image",
-          partial_image_b64: "cGFydGlhbA==",
-        },
-        {
-          type: "response.output_item.done",
-          item: {
-            type: "image_generation_call",
-            id: "ig_live_contract",
-            status: "generating",
-            result: "ZmluYWw=",
-          },
-        },
-        { type: "response.completed", response: { status: "completed" } },
-      ]),
-    );
-    const harness = createImageHarness({
-      registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
-    });
-
-    const result = await executeImageTool(harness, { prompt: "draw", save: "none" });
-
     expect(result.details).toMatchObject({
-      id: "ig_live_contract",
+      id: expect.stringMatching(/^ig_/),
       status: "completed",
-      data: "ZmluYWw=",
+      data: "Zm9v",
+      model: "gpt-image-2",
+      action: "generate",
+      outputFormat: "png",
+      savedPath: undefined,
     });
   });
 
-  test("parses CRLF-delimited SSE events", async () => {
-    stubFetch(sseResponse([finalImageEvent("ig_crlf", "Y3JsZg==")], "\r\n"));
+  test("maps legacy explicit Responses models to gpt-image-2", async () => {
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
     });
 
-    const result = await executeImageTool(harness, { prompt: "draw", save: "none" });
+    await executeImageTool(harness, {
+      prompt: "draw",
+      model: "openai-codex/gpt-5.5",
+      save: "none",
+    });
 
-    expect(result.details).toMatchObject({ id: "ig_crlf", data: "Y3JsZg==" });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-image-2" });
   });
 
-  test("rejects streams that end without a completed image_generation_call", async () => {
-    stubFetch(sseResponse([{ partial_image_b64: "cGFydGlhbA==" }]));
+  test("converts standalone PNG results to the requested output format locally", async () => {
+    const png = await sharp({
+      create: {
+        width: 1,
+        height: 1,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+    stubFetch(codexImageResponse(png.toString("base64")));
+    const harness = createImageHarness({
+      registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
+    });
+
+    const result = await executeImageTool(harness, {
+      prompt: "draw",
+      outputFormat: "webp",
+      save: "none",
+    });
+    const details = result.details as { data: string; mimeType: string; outputFormat: string };
+
+    expect(details.mimeType).toBe("image/webp");
+    expect(details.outputFormat).toBe("webp");
+    expect((await sharp(Buffer.from(details.data, "base64")).metadata()).format).toBe("webp");
+  });
+
+  test("rejects standalone responses without image data", async () => {
+    stubFetch(
+      new Response(JSON.stringify({ data: [] }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
     const harness = createImageHarness({
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
     });
 
     await expect(executeImageTool(harness, { prompt: "draw", save: "none" })).rejects.toThrow(
-      "No completed image_generation_call result returned by Codex.",
+      "No image data returned by Codex Images API.",
     );
   });
 
-  test("uploads project-local reference images and saves generated output to the project", async () => {
+  test("uploads project-local references through the edit endpoint and saves output", async () => {
     const cwd = createTempProject();
     const relativeInput = join(cwd, "input.png");
     const absoluteInput = join(cwd, "absolute.png");
@@ -350,7 +329,7 @@ describe("openai_image tool execution", () => {
     await writeTinyPng(absoluteInput);
     const relativeData = readFileSync(relativeInput).toString("base64");
     const absoluteData = readFileSync(absoluteInput).toString("base64");
-    const fetchMock = stubFetch(sseResponse([finalImageEvent("ig_saved", "Zm9v")]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       cwd,
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
@@ -362,34 +341,66 @@ describe("openai_image tool execution", () => {
       images: ["input.png", absoluteInput],
     });
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(String(init.body)) as { input: Array<{ content: unknown[] }> };
-    expect(body.input[0]?.content).toEqual([
-      { type: "input_text", text: "edit it" },
-      {
-        type: "input_image",
-        detail: "auto",
-        image_url: `data:image/png;base64,${relativeData}`,
-      },
-      {
-        type: "input_image",
-        detail: "auto",
-        image_url: `data:image/png;base64,${absoluteData}`,
-      },
-    ]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(_test.imageTest.CODEX_IMAGE_EDITS_URL);
+    expect(JSON.parse(String(init.body))).toEqual({
+      images: [
+        { image_url: `data:image/png;base64,${relativeData}` },
+        { image_url: `data:image/png;base64,${absoluteData}` },
+      ],
+      prompt: "edit it",
+      background: "auto",
+      model: "gpt-image-2",
+      quality: "auto",
+      size: "auto",
+    });
     const outputDir = join(cwd, ".pi", "generated-images");
     const files = readdirSync(outputDir);
     expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/^openai-image-.*-ig_saved\.png$/);
+    expect(files[0]).toMatch(/^openai-image-.*-ig_.*\.png$/);
     expect(readFileSync(join(outputDir, files[0]!)).toString("base64")).toBe("Zm9v");
-    expect(result.details).toMatchObject({ savedPath: join(outputDir, files[0]!) });
+    expect(result.details).toMatchObject({
+      action: "edit",
+      savedPath: join(outputDir, files[0]!),
+    });
+  });
+
+  test("requires references for an explicit edit action", async () => {
+    const fetchMock = stubFetch(codexImageResponse());
+    const harness = createImageHarness({
+      registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
+    });
+
+    await expect(
+      executeImageTool(harness, { prompt: "edit it", action: "edit", save: "none" }),
+    ).rejects.toThrow("action=edit requires at least one image");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("does not silently drop references for an explicit generate action", async () => {
+    const cwd = createTempProject();
+    await writeTinyPng(join(cwd, "reference.png"));
+    const fetchMock = stubFetch(codexImageResponse());
+    const harness = createImageHarness({
+      cwd,
+      registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
+    });
+
+    await expect(
+      executeImageTool(harness, {
+        prompt: "draw from this",
+        action: "generate",
+        images: ["reference.png"],
+      }),
+    ).rejects.toThrow("action=generate does not accept images");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("uses detected image content type instead of a misleading file extension", async () => {
     const cwd = createTempProject();
     const renamedJpeg = join(cwd, "actually-jpeg.png");
     await writeTinyJpeg(renamedJpeg);
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       cwd,
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
@@ -406,7 +417,7 @@ describe("openai_image tool execution", () => {
   });
 
   test("honors an explicitly refined tool prompt instead of replacing it from history", async () => {
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
     });
@@ -417,16 +428,13 @@ describe("openai_image tool execution", () => {
     await executeImageTool(harness, { prompt: "explicitly refined prompt", save: "none" });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(String(init.body)) as { input: Array<{ content: unknown[] }> };
-    expect(body.input[0]?.content).toContainEqual({
-      type: "input_text",
-      text: "explicitly refined prompt",
-    });
+    const body = JSON.parse(String(init.body)) as { prompt: string };
+    expect(body.prompt).toBe("explicitly refined prompt");
   });
 
   test("resolves relative custom save directories from the project", async () => {
     const cwd = createTempProject();
-    stubFetch(sseResponse([finalImageEvent("ig_custom", "Zm9v")]));
+    stubFetch(codexImageResponse());
     const harness = createImageHarness({
       cwd,
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
@@ -447,7 +455,7 @@ describe("openai_image tool execution", () => {
   });
 
   test("rejects a missing custom save directory before requesting an image", async () => {
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
     });
@@ -463,7 +471,7 @@ describe("openai_image tool execution", () => {
     const outsideDir = createTempProject();
     const outsideImage = join(outsideDir, "outside.png");
     await writeTinyPng(outsideImage);
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       cwd,
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
@@ -481,7 +489,7 @@ describe("openai_image tool execution", () => {
   test("rejects directory image inputs before upload", async () => {
     const cwd = createTempProject();
     mkdirSync(join(cwd, "images"));
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       cwd,
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
@@ -496,7 +504,7 @@ describe("openai_image tool execution", () => {
   test("rejects non-image files before upload", async () => {
     const cwd = createTempProject();
     writeFileSync(join(cwd, "notes.txt"), "not an image", "utf8");
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       cwd,
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
@@ -513,7 +521,7 @@ describe("openai_image tool execution", () => {
     const largeImage = join(cwd, "large.png");
     writeFileSync(largeImage, "");
     truncateSync(largeImage, _test.imageTest.MAX_IMAGE_INPUT_BYTES + 1);
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       cwd,
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
@@ -532,7 +540,7 @@ describe("openai_image tool execution", () => {
       (_, index) => `input-${index}.png`,
     );
     await Promise.all(imageNames.map((name) => writeTinyPng(join(cwd, name))));
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       cwd,
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
@@ -545,7 +553,7 @@ describe("openai_image tool execution", () => {
   });
 
   test("rejects when image generation is disabled before calling fetch", async () => {
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
       imageConfig: { enabled: false },
@@ -558,7 +566,7 @@ describe("openai_image tool execution", () => {
   });
 
   test("rejects when Codex credentials are missing before calling fetch", async () => {
-    const fetchMock = stubFetch(sseResponse([finalImageEvent()]));
+    const fetchMock = stubFetch(codexImageResponse());
     const harness = createImageHarness({ registryCredentials: undefined });
 
     await expect(executeImageTool(harness, { prompt: "draw" })).rejects.toThrow(
@@ -586,9 +594,13 @@ describe("openai_image tool execution", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test("redacts and bounds SSE error messages", async () => {
-    const message = `bad\u001b[31m Bearer sk-secretsecret accountId=acct_1234567890abcdef ${"x".repeat(700)}`;
-    stubFetch(sseResponse([{ type: "error", message }]));
+  test("bounds malformed standalone response errors", async () => {
+    const secretBody = `Bearer sk-secretsecret accountId=acct_1234567890abcdef ${"x".repeat(700)}`;
+    stubFetch(
+      new Response(JSON.stringify({ data: [], diagnostic: secretBody }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
     const harness = createImageHarness({
       registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
     });
@@ -596,15 +608,10 @@ describe("openai_image tool execution", () => {
     const error = await rejectedError(executeImageTool(harness, { prompt: "draw" }));
     const debug = await harness.getDebug(harness.ctx);
 
-    expect(error.message).toContain("Codex image error: bad");
-    expect(error.message).not.toContain("\u001b");
+    expect(error.message).toBe("No image data returned by Codex Images API.");
     expect(error.message).not.toContain("sk-secretsecret");
     expect(error.message).not.toContain("acct_1234567890abcdef");
-    expect(error.message.length).toBeLessThanOrEqual(520);
-    expect(debug.lastError).toContain("Codex image error: bad");
-    expect(debug.lastError).not.toContain("sk-secretsecret");
-    expect(debug.lastError).not.toContain("acct_1234567890abcdef");
-    expect(debug.lastError?.length).toBeLessThanOrEqual(500);
+    expect(debug.lastError).toBe(error.message);
   });
 
   test("masks image debug account identifiers", async () => {
@@ -617,7 +624,11 @@ describe("openai_image tool execution", () => {
 
     const debug = await harness.getDebug(harness.ctx);
 
-    expect(debug.accountId).toBe("acct...cdef");
+    expect(debug).toMatchObject({
+      endpoint: _test.imageTest.CODEX_IMAGES_BASE_URL,
+      defaultModel: "gpt-image-2",
+      accountId: "acct...cdef",
+    });
     expect(debug.accountId).not.toBe("acct_1234567890abcdef");
   });
 });
