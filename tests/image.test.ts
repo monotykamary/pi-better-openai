@@ -288,6 +288,38 @@ describe("openai_image tool execution", () => {
     expect(result.details).toMatchObject({ id: "ig_final", data: "ZmluYWw=" });
   });
 
+  test("accepts a done image item whose embedded status is still generating", async () => {
+    stubFetch(
+      sseResponse([
+        {
+          type: "response.image_generation_call.partial_image",
+          partial_image_b64: "cGFydGlhbA==",
+        },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "image_generation_call",
+            id: "ig_live_contract",
+            status: "generating",
+            result: "ZmluYWw=",
+          },
+        },
+        { type: "response.completed", response: { status: "completed" } },
+      ]),
+    );
+    const harness = createImageHarness({
+      registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
+    });
+
+    const result = await executeImageTool(harness, { prompt: "draw", save: "none" });
+
+    expect(result.details).toMatchObject({
+      id: "ig_live_contract",
+      status: "completed",
+      data: "ZmluYWw=",
+    });
+  });
+
   test("parses CRLF-delimited SSE events", async () => {
     stubFetch(sseResponse([finalImageEvent("ig_crlf", "Y3JsZg==")], "\r\n"));
     const harness = createImageHarness({

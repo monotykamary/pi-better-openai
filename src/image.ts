@@ -335,7 +335,13 @@ function extractImageFromEvent(
   fallbackMimeType: string,
 ): ExtractedImageResult | undefined {
   if (!isRecord(event)) return undefined;
-  const item = asImageResultItem(event.item) ?? asImageResultItem(event);
+  let item = asImageResultItem(event.item) ?? asImageResultItem(event);
+  if (!item && isRecord(event.response) && Array.isArray(event.response.output)) {
+    for (const outputItem of event.response.output) {
+      item = asImageResultItem(outputItem);
+      if (item) break;
+    }
+  }
   if (item) {
     const raw =
       typeof item.result === "string" && item.result.trim()
@@ -400,9 +406,14 @@ async function parseSseForImage(
             event = undefined;
           }
           const image = extractImageFromEvent(event, fallbackMimeType);
-          if (image?.data && image.status === "completed") {
+          const terminalImageEvent =
+            isRecord(event) &&
+            (event.type === "response.output_item.done" ||
+              event.type === "response.completed" ||
+              event.type === "response.done");
+          if (image?.data && (image.status === "completed" || terminalImageEvent)) {
             await reader.cancel().catch(() => undefined);
-            return image;
+            return { ...image, status: "completed" };
           }
           if (isRecord(event) && event.type === "response.failed") {
             const error =
