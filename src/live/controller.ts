@@ -25,7 +25,14 @@ Treat delegation context as your own internal progress and result. Never mention
 
 For greetings, clarification, or ordinary conversation that needs no tools, answer directly without delegating. Preserve one-assistant continuity: converse here, delegate execution, then communicate the returned result as your own.`;
 
-export type LivePhase = "connecting" | "listening" | "working" | "speaking" | "muted" | "error";
+export type LivePhase =
+  | "standby"
+  | "connecting"
+  | "listening"
+  | "working"
+  | "speaking"
+  | "muted"
+  | "error";
 
 export interface LiveTranscript {
   role: "user" | "assistant";

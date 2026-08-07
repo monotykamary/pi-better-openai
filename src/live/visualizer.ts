@@ -151,7 +151,12 @@ export class LiveVisualizer implements Component {
 
   #renderLines(width: number): string[] {
     if (width === 1) {
-      const color = this.#phase === "error" ? "error" : this.#phase === "muted" ? "dim" : "success";
+      const color =
+        this.#phase === "error"
+          ? "error"
+          : this.#phase === "muted" || this.#phase === "standby"
+            ? "dim"
+            : "success";
       return [
         this.#options.theme.fg("border", "┐"),
         this.#options.theme.fg(color, "▂"),
@@ -167,7 +172,7 @@ export class LiveVisualizer implements Component {
       theme.fg("border", "│") + content + theme.fg("border", "│");
     const top = theme.fg("border", `┌${"─".repeat(innerWidth)}┐`);
     const spectrumColor: ThemeColor =
-      this.#phase === "muted" || this.#phase === "connecting"
+      this.#phase === "muted" || this.#phase === "connecting" || this.#phase === "standby"
         ? "dim"
         : this.#phase === "error"
           ? "error"
@@ -207,6 +212,7 @@ export class LiveVisualizer implements Component {
     const theme = this.#options.theme;
     const spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     const staticIcons: Record<LivePhase, string> = {
+      standby: "◌",
       connecting: "○",
       listening: "●",
       working: "○",
@@ -219,6 +225,7 @@ export class LiveVisualizer implements Component {
         ? spinners[this.#frame % spinners.length]!
         : staticIcons[this.#phase];
     const phaseColors: Record<LivePhase, ThemeColor> = {
+      standby: "dim",
       connecting: "dim",
       listening: "success",
       working: "warning",
@@ -251,7 +258,10 @@ export class LiveVisualizer implements Component {
     const microphoneEnergy = Math.min(1, Math.sqrt(this.#displayLevel * 5));
     const connectingEnergy =
       this.#phase === "connecting" ? 0.06 + 0.03 * Math.sin(this.#frame * 0.35) : 0;
-    const energy = this.#phase === "muted" ? 0 : Math.max(microphoneEnergy, connectingEnergy);
+    const energy =
+      this.#phase === "muted" || this.#phase === "standby"
+        ? 0
+        : Math.max(microphoneEnergy, connectingEnergy);
     const maxHeight = rows * (blocks.length - 1);
     for (let column = 0; column < width; column += 1) {
       const carrier = 0.5 + 0.5 * Math.sin(this.#frame * 0.43 + column * 0.71);
