@@ -24,10 +24,12 @@ import {
   DEFAULT_LIVE_CONFIG,
   DEFAULT_PET_CONFIG,
   DEFAULT_SUPPORTED_MODELS,
+  DEFAULT_WEBSEARCH_CONFIG,
   PET_STATES,
   FOOTER_SETTING_DESCRIPTORS,
   USAGE_SETTING_DESCRIPTORS,
   IMAGE_SETTING_DESCRIPTORS,
+  WEBSEARCH_SETTING_DESCRIPTORS,
   LIVE_SETTING_DESCRIPTORS,
   PET_SETTING_DESCRIPTORS,
   FAST_SETTING_DESCRIPTORS,
@@ -51,6 +53,7 @@ import {
   readCodexAuth,
 } from "./src/usage.ts";
 import { registerOpenAIImage, _imageTest } from "./src/image.ts";
+import { registerOpenAIWebSearch, _websearchTest } from "./src/websearch.ts";
 import { registerOpenAILive } from "./src/live/index.ts";
 import {
   type CodexPetPackage,
@@ -296,6 +299,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       "",
       `Image enabled: ${cfg.image.enabled}`,
       `Image default save: ${cfg.image.defaultSave}`,
+      `Websearch enabled: ${cfg.websearch.enabled}`,
+      `Websearch model: ${cfg.websearch.model} (${cfg.websearch.reasoningEffort}/${cfg.websearch.responseLength}, ${cfg.websearch.maxOutputTokens} tokens, ${cfg.websearch.timeoutMs}ms)`,
       `Live enabled: ${cfg.live.enabled}`,
       `Live voice: ${cfg.live.voice}`,
       `Pet enabled: ${cfg.pets.enabled}`,
@@ -538,6 +543,12 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       : "disabled";
   }
 
+  function websearchSettingsSummary(cfg: ResolvedConfig): string {
+    return cfg.websearch.enabled
+      ? `enabled · ${cfg.websearch.model} · ${cfg.websearch.reasoningEffort}/${cfg.websearch.responseLength}`
+      : "disabled";
+  }
+
   function liveSettingsSummary(cfg: ResolvedConfig): string {
     return cfg.live.enabled ? `enabled · ${cfg.live.voice}` : "disabled";
   }
@@ -594,6 +605,10 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   function buildImageSettingsItems(cfg: ResolvedConfig): SettingsPickerItem[] {
     return settingsItemsFromDescriptors(IMAGE_SETTING_DESCRIPTORS, cfg);
+  }
+
+  function buildWebsearchSettingsItems(cfg: ResolvedConfig): SettingsPickerItem[] {
+    return settingsItemsFromDescriptors(WEBSEARCH_SETTING_DESCRIPTORS, cfg);
   }
 
   function buildLiveSettingsItems(cfg: ResolvedConfig): SettingsPickerItem[] {
@@ -688,6 +703,19 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
             () => buildImageSettingsItems(config(ctx)),
             ctx,
             () => done(imageSettingsSummary(config(ctx))),
+          ),
+      },
+      {
+        id: "section.websearch",
+        label: "Web search tool",
+        currentValue: websearchSettingsSummary(cfg),
+        description: "Configure ChatGPT Codex web search defaults.",
+        submenu: (_value, done) =>
+          settingsSubmenu(
+            "Web search tool settings",
+            () => buildWebsearchSettingsItems(config(ctx)),
+            ctx,
+            () => done(websearchSettingsSummary(config(ctx))),
           ),
       },
       {
@@ -854,6 +882,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   });
 
   registerOpenAIImage(pi, config);
+  registerOpenAIWebSearch(pi, config);
   registerOpenAILive(pi, config);
   registerOpenAIPets(pi, {
     wake: async (ctx, slug) => {
@@ -1302,6 +1331,7 @@ export const _test = {
   DEFAULT_IMAGE_CONFIG,
   DEFAULT_LIVE_CONFIG,
   DEFAULT_PET_CONFIG,
+  DEFAULT_WEBSEARCH_CONFIG,
   SERVICE_TIER,
   configPaths,
   abbreviateHomePath,
@@ -1324,5 +1354,6 @@ export const _test = {
   readCodexAuth,
   textPanel,
   imageTest: _imageTest,
+  websearchTest: _websearchTest,
   petsTest: _petsTest,
 };

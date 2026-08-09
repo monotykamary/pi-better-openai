@@ -34,11 +34,13 @@ Usage display, image generation, and live voice require pi's `openai-codex` OAut
 - Interactive settings picker via `/openai-settings`.
 - Footer customization for model, thinking, fast mode, usage, and token/cost context.
 - OpenAI image generation/editing through the `openai_image` tool and `/openai-image` command.
+- Live web search through the `openai_websearch` tool and `/openai-websearch` command, backed by the ChatGPT Codex search backend.
 - Codex-backed realtime voice through `/live`, with an animated microphone waveform and coding-task delegation into the active pi session.
 - Animated Codex custom pets rendered in the Better OpenAI footer.
 - Commands:
   - `/fast` toggles fast mode.
   - `/openai-image <prompt>` generates an image directly.
+  - `/openai-websearch <query>` searches the web and inserts the cited answer into the session.
   - `/live` starts or stops realtime voice mode. `Ctrl+Shift+L` is the keyboard toggle.
   - `/pets [help|list|wake [slug]|tuck|select <slug>]` renders or manages custom pets from `${CODEX_HOME:-~/.codex}/pets`.
   - `/openai-usage` shows current OpenAI subscription usage.
@@ -150,6 +152,31 @@ Save modes:
 - `none` returns the image without saving it.
 
 The repository ignores `.pi/`, so generated images and local config should not be committed.
+
+## Web search
+
+Use the command for a quick search:
+
+```text
+/openai-websearch latest tanstack query release
+```
+
+Agents can call the `openai_websearch` tool directly. Supported parameters:
+
+- `query` (required): the web search query.
+- `responseLength`: `short`, `medium`, or `long`. Defaults to the configured value.
+
+The tool returns a synthesized answer plus cited source URLs. It calls the
+undocumented `chatgpt.com/backend-api/codex/alpha/search` endpoint with your ChatGPT
+OAuth credentials (`openai-codex` login), so it can change or break without notice;
+OAuth/API-key-only setups without ChatGPT login are not supported.
+
+Settings under `websearch` in the config file or the `/openai-settings` picker:
+
+- `enabled` (default `true`), `model` (default `gpt-5.6-luna`),
+  `reasoningEffort` (default `max`), `responseLength` (default `short`),
+  `maxOutputTokens` (default `4096`, clamped to 256-100000), and
+  `timeoutMs` (default `25000`, clamped to 5000-120000).
 
 ## Codex pets
 

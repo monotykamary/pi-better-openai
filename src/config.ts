@@ -13,6 +13,8 @@ import { piAgentDir } from "./paths.ts";
 export const FOOTER_MODES = ["replace", "status", "off"] as const;
 export const IMAGE_SAVE_MODES = ["none", "project", "global", "custom"] as const;
 export const IMAGE_OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const;
+export const WEBSEARCH_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const WEBSEARCH_RESPONSE_LENGTHS = ["short", "medium", "long"] as const;
 export const PET_PLACEMENTS = [
   "stacked",
   "inline-left",
@@ -45,6 +47,8 @@ export const DEFAULT_SUPPORTED_MODELS = [
 export type FooterMode = (typeof FOOTER_MODES)[number];
 export type ImageSaveMode = (typeof IMAGE_SAVE_MODES)[number];
 export type ImageOutputFormat = (typeof IMAGE_OUTPUT_FORMATS)[number];
+export type WebsearchReasoningEffort = (typeof WEBSEARCH_REASONING_EFFORTS)[number];
+export type WebsearchResponseLength = (typeof WEBSEARCH_RESPONSE_LENGTHS)[number];
 export type PetPlacement = (typeof PET_PLACEMENTS)[number];
 export type PetState = (typeof PET_STATES)[number];
 
@@ -64,6 +68,15 @@ export type ImageConfig = {
   defaultModel?: string;
   defaultSave?: ImageSaveMode;
   outputFormat?: ImageOutputFormat;
+  timeoutMs?: number;
+};
+
+export type WebsearchConfig = {
+  enabled?: boolean;
+  model?: string;
+  reasoningEffort?: WebsearchReasoningEffort;
+  responseLength?: WebsearchResponseLength;
+  maxOutputTokens?: number;
   timeoutMs?: number;
 };
 
@@ -93,6 +106,7 @@ export interface ConfigFile {
   usage?: UsageConfig;
   footer?: FooterConfig;
   image?: ImageConfig;
+  websearch?: WebsearchConfig;
   live?: LiveConfig;
   pets?: PetConfig;
 }
@@ -115,6 +129,7 @@ export interface ResolvedConfig {
   usage: Required<UsageConfig>;
   footer: Required<FooterConfig>;
   image: Required<ImageConfig>;
+  websearch: Required<WebsearchConfig>;
   live: Required<LiveConfig>;
   pets: Required<PetConfig>;
 }
@@ -138,6 +153,17 @@ export const DEFAULT_IMAGE_CONFIG: Required<ImageConfig> = {
   defaultSave: "project",
   outputFormat: "png",
   timeoutMs: 180_000,
+};
+
+export const DEFAULT_WEBSEARCH_MODEL = "gpt-5.6-luna";
+
+export const DEFAULT_WEBSEARCH_CONFIG: Required<WebsearchConfig> = {
+  enabled: true,
+  model: DEFAULT_WEBSEARCH_MODEL,
+  reasoningEffort: "max",
+  responseLength: "short",
+  maxOutputTokens: 4096,
+  timeoutMs: 25_000,
 };
 
 export const DEFAULT_LIVE_CONFIG: Required<LiveConfig> = {
@@ -166,11 +192,19 @@ export const DEFAULT_CONFIG: ConfigFile = {
   usage: DEFAULT_USAGE_CONFIG,
   footer: DEFAULT_FOOTER_CONFIG,
   image: DEFAULT_IMAGE_CONFIG,
+  websearch: DEFAULT_WEBSEARCH_CONFIG,
   live: DEFAULT_LIVE_CONFIG,
   pets: DEFAULT_PET_CONFIG,
 };
 
-export type SettingsOptionSection = "root" | "usage" | "footer" | "image" | "live" | "pets";
+export type SettingsOptionSection =
+  | "root"
+  | "usage"
+  | "footer"
+  | "image"
+  | "websearch"
+  | "live"
+  | "pets";
 
 export type SettingsValueContext = {
   petEmptyValue?: string;
@@ -314,6 +348,69 @@ export const IMAGE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
   },
 ];
 
+export const WEBSEARCH_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
+  {
+    id: "websearch.enabled",
+    section: "websearch",
+    key: "enabled",
+    label: "Web search tool",
+    currentValue: (cfg) => String(cfg.websearch.enabled),
+    values: ["true", "false"],
+    description: "Allow the openai_websearch tool to make search requests.",
+    parse: booleanSetting,
+  },
+  {
+    id: "websearch.model",
+    section: "websearch",
+    key: "model",
+    label: "Search model",
+    currentValue: (cfg) => cfg.websearch.model,
+    values: ["gpt-5.6-luna"],
+    description: "Model used by the ChatGPT Codex search backend.",
+    parse: stringSetting,
+  },
+  {
+    id: "websearch.reasoningEffort",
+    section: "websearch",
+    key: "reasoningEffort",
+    label: "Search reasoning",
+    currentValue: (cfg) => cfg.websearch.reasoningEffort,
+    values: WEBSEARCH_REASONING_EFFORTS,
+    description: "Reasoning effort requested from the search backend.",
+    parse: stringSetting,
+  },
+  {
+    id: "websearch.responseLength",
+    section: "websearch",
+    key: "responseLength",
+    label: "Answer length",
+    currentValue: (cfg) => cfg.websearch.responseLength,
+    values: WEBSEARCH_RESPONSE_LENGTHS,
+    description: "Default answer length produced by the search backend.",
+    parse: stringSetting,
+  },
+  {
+    id: "websearch.maxOutputTokens",
+    section: "websearch",
+    key: "maxOutputTokens",
+    label: "Max output tokens",
+    currentValue: (cfg) => String(cfg.websearch.maxOutputTokens),
+    values: ["1024", "2048", "4096", "8192"],
+    description: "Maximum output tokens for a search request.",
+    parse: numberSetting,
+  },
+  {
+    id: "websearch.timeoutMs",
+    section: "websearch",
+    key: "timeoutMs",
+    label: "Search timeout",
+    currentValue: (cfg) => String(cfg.websearch.timeoutMs),
+    values: ["10000", "25000", "60000", "120000"],
+    description: "Web search request timeout in milliseconds.",
+    parse: numberSetting,
+  },
+];
+
 export const LIVE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
   {
     id: "live.enabled",
@@ -446,6 +543,7 @@ export const SETTINGS_OPTION_DESCRIPTORS: readonly SettingsOptionDescriptor[] = 
   ...FOOTER_SETTING_DESCRIPTORS,
   ...USAGE_SETTING_DESCRIPTORS,
   ...IMAGE_SETTING_DESCRIPTORS,
+  ...WEBSEARCH_SETTING_DESCRIPTORS,
   ...LIVE_SETTING_DESCRIPTORS,
   ...PET_SETTING_DESCRIPTORS,
 ];
@@ -552,6 +650,28 @@ export function readConfig(path: string): ConfigFile | undefined {
     )
       config.image.outputFormat = parsed.image.outputFormat as ImageOutputFormat;
     if (typeof parsed.image.timeoutMs === "number") config.image.timeoutMs = parsed.image.timeoutMs;
+  }
+  if (isRecord(parsed.websearch)) {
+    config.websearch = {};
+    if (typeof parsed.websearch.enabled === "boolean")
+      config.websearch.enabled = parsed.websearch.enabled;
+    if (typeof parsed.websearch.model === "string" && parsed.websearch.model.trim())
+      config.websearch.model = parsed.websearch.model.trim();
+    if (
+      typeof parsed.websearch.reasoningEffort === "string" &&
+      (WEBSEARCH_REASONING_EFFORTS as readonly string[]).includes(parsed.websearch.reasoningEffort)
+    )
+      config.websearch.reasoningEffort = parsed.websearch
+        .reasoningEffort as WebsearchReasoningEffort;
+    if (
+      typeof parsed.websearch.responseLength === "string" &&
+      (WEBSEARCH_RESPONSE_LENGTHS as readonly string[]).includes(parsed.websearch.responseLength)
+    )
+      config.websearch.responseLength = parsed.websearch.responseLength as WebsearchResponseLength;
+    if (typeof parsed.websearch.maxOutputTokens === "number")
+      config.websearch.maxOutputTokens = parsed.websearch.maxOutputTokens;
+    if (typeof parsed.websearch.timeoutMs === "number")
+      config.websearch.timeoutMs = parsed.websearch.timeoutMs;
   }
   if (isRecord(parsed.live)) {
     config.live = {};
@@ -698,6 +818,29 @@ export function resolveConfig(cwd: string): ResolvedConfig {
           projectConfig.image?.timeoutMs ??
             globalConfig.image?.timeoutMs ??
             DEFAULT_IMAGE_CONFIG.timeoutMs,
+        ),
+      ),
+    },
+    websearch: {
+      ...DEFAULT_WEBSEARCH_CONFIG,
+      ...globalConfig.websearch,
+      ...projectConfig.websearch,
+      maxOutputTokens: Math.max(
+        256,
+        Math.min(
+          100_000,
+          projectConfig.websearch?.maxOutputTokens ??
+            globalConfig.websearch?.maxOutputTokens ??
+            DEFAULT_WEBSEARCH_CONFIG.maxOutputTokens,
+        ),
+      ),
+      timeoutMs: Math.max(
+        5_000,
+        Math.min(
+          120_000,
+          projectConfig.websearch?.timeoutMs ??
+            globalConfig.websearch?.timeoutMs ??
+            DEFAULT_WEBSEARCH_CONFIG.timeoutMs,
         ),
       ),
     },
