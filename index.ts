@@ -4,12 +4,14 @@
  * Adds `service_tier: "priority"` to OpenAI provider payloads while fast mode is
  * enabled and the selected model is in the configured allow-list.
  */
+import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  getSettingsListTheme,
-  type ExtensionAPI,
-  type ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
-import { Container, Key, matchesKey, SettingsList } from "@earendil-works/pi-tui";
+  Container,
+  Key,
+  matchesKey,
+  SettingsList,
+  type SettingsListTheme,
+} from "@earendil-works/pi-tui";
 import { CONFIG_BASENAME, STATUS_KEY } from "./src/identity.ts";
 import {
   formatTokens,
@@ -76,6 +78,23 @@ import {
   isTerminalImageLine,
   petSizeCellsForPlacement,
 } from "./src/footer-layout.ts";
+
+// pi-core's getSettingsListTheme pulls the host module graph into this
+// extension's loader (~0.5s of startup). The settings picker is a command-time
+// surface, so the theme loads when it first opens.
+let loadedSettingsListTheme: SettingsListTheme | undefined;
+const loadSettingsListTheme = async (): Promise<SettingsListTheme> => {
+  loadedSettingsListTheme ??= (
+    await import("@earendil-works/pi-coding-agent")
+  ).getSettingsListTheme();
+  return loadedSettingsListTheme;
+};
+const requireSettingsListTheme = (): SettingsListTheme => {
+  if (!loadedSettingsListTheme) {
+    throw new Error("Settings list theme accessed before /openai-settings preload");
+  }
+  return loadedSettingsListTheme;
+};
 
 const COMMAND = "fast";
 const OPENAI_STATUS_COMMAND = "openai-usage";
@@ -367,7 +386,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       renderExtra?: (width: number) => string[];
     },
   ) {
-    const theme = getSettingsListTheme();
+    const theme = requireSettingsListTheme();
     let selectedIndex = 0;
     let searchQuery = "";
     let closed = false;
@@ -814,6 +833,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       ctx.ui.notify("Better OpenAI settings require interactive TUI mode.", "warning");
       return;
     }
+    await loadSettingsListTheme();
     try {
       petController.settingsPets = await listCodexPets();
     } catch {
@@ -839,7 +859,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
         const settingsList = new SettingsList(
           buildSettingsSections(ctx, refresh(ctx)),
           8,
-          getSettingsListTheme(),
+          requireSettingsListTheme(),
           (id, newValue) => {
             if (!id.startsWith("section.")) writeSetting(ctx, id, newValue);
             settingsList.updateValue(
