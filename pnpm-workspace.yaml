@@ -2,8 +2,8 @@ packages:
   - "."
 
 overrides:
-  "@earendil-works/pi-agent-core": 0.84.2
-  "@earendil-works/pi-ai": 0.84.2
+  "@earendil-works/pi-agent-core": '0.84.4'
+  "@earendil-works/pi-ai": '0.84.4'
   brace-expansion: 5.0.9
   postcss: 8.5.25
   protobufjs: 7.6.5
@@ -20,10 +20,10 @@ minimumReleaseAgeExclude:
   - "@oh-my-pi/pi-natives-linux-arm64@17.2.9"
   - "@oh-my-pi/pi-natives-linux-x64@17.2.9"
   - "@oh-my-pi/pi-natives-win32-x64@17.2.9"
-  - "@earendil-works/pi-agent-core@0.84.2"
-  - "@earendil-works/pi-ai@0.84.2"
-  - '@earendil-works/pi-client@0.84.2 || 0.84.3'
-  - '@earendil-works/pi-coding-agent@0.84.2 || 0.84.3'
-  - '@earendil-works/pi-protocol@0.84.2 || 0.84.3'
-  - "@earendil-works/pi-telemetry@0.84.2"
-  - '@earendil-works/pi-tui@0.84.2 || 0.84.3'
+  - "@earendil-works/pi-agent-core@0.84.2 || 0.84.4"
+  - "@earendil-works/pi-ai@0.84.2 || 0.84.4"
+  - '@earendil-works/pi-client@0.84.2 || 0.84.3 || 0.84.4'
+  - '@earendil-works/pi-coding-agent@0.84.2 || 0.84.3 || 0.84.4'
+  - '@earendil-works/pi-protocol@0.84.2 || 0.84.3 || 0.84.4'
+  - "@earendil-works/pi-telemetry@0.84.2 || 0.84.4"
+  - '@earendil-works/pi-tui@0.84.2 || 0.84.3 || 0.84.4'

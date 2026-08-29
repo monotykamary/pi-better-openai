@@ -59,8 +59,8 @@
     "ws": "8.21.2"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.3",
-    "@earendil-works/pi-tui": "0.84.3",
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-tui": "0.84.4",
     "@types/node": "~22.19.0",
     "@types/proxy-from-env": "1.0.4",
     "@types/ws": "8.18.1",
