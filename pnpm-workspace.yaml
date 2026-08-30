@@ -2,6 +2,7 @@ packages:
   - "."
 
 overrides:
+  nanoid: 3.3.18
   "@earendil-works/pi-agent-core": "0.84.4"
   "@earendil-works/pi-ai": "0.84.4"
   brace-expansion: 5.0.9
