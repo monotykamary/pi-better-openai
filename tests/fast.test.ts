@@ -155,6 +155,20 @@ describe("fast mode provider injection", () => {
     expect(payload).toEqual({ model: "gpt-4.1" });
   });
 
+  test("does not warn on session start when desired fast mode is inactive for an unsupported model", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, {
+      active: false,
+      desiredActive: true,
+      supportedModels: ["openai/gpt-5.5"],
+    });
+    const harness = createHarness(cwd, createModel("runinfra", "glm-5-3-flash"));
+
+    await emit(harness, "session_start");
+
+    expect(harness.ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
   test("does not inject when fast mode is disabled and leaves the payload unchanged", async () => {
     const cwd = createTempProject();
     writeProjectConfig(cwd, {

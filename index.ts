@@ -1265,9 +1265,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       fastController.active !== nextConfig.active
     )
       persist(nextConfig);
-    if (fastController.desiredActive && !fastController.active) {
-      ctx.ui.notify(fastController.unsupportedRequestMessage(ctx, nextConfig), "warning");
-    }
     if (hasTerminalUI(ctx)) petController.installResizeGuard(ctx);
     refreshFooterTotals(ctx);
     updateFooter(ctx);
