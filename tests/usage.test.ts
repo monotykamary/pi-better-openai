@@ -215,7 +215,7 @@ describe("usage helpers", () => {
     expect(usage.sevenDayLeftPercent).toBe(51);
     expect(usage.isLimited).toBe(false);
     expect(_test.formatUsageSnapshot(usage, { showResetTimes: false })).toMatch(
-      /^Usage: 5h: 99% \| 7d: 51%$/,
+      /^Usage: 5h: 99% · 7d: 51%$/,
     );
   });
 

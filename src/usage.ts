@@ -252,7 +252,7 @@ export function formatUsageSnapshot(
         ),
       ].filter((value): value is string => value !== null)
     : [];
-  return `Usage: 5h: ${fiveHour} | 7d: ${sevenDay}${resets.length ? ` | ${resets.join(" | ")}` : ""}`;
+  return `Usage: 5h: ${fiveHour} · 7d: ${sevenDay}${resets.length ? ` · ${resets.join(" · ")}` : ""}`;
 }
 
 function remainingResetSeconds(

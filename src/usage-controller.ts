@@ -94,7 +94,7 @@ export class UsageController {
       return "Usage unavailable.";
     const stale =
       this.usageUpdatedAt && Date.now() - this.usageUpdatedAt > cfg.usage.refreshIntervalMs * 2
-        ? ` | stale ${formatResetCountdown((Date.now() - this.usageUpdatedAt) / 1000)}`
+        ? ` · stale ${formatResetCountdown((Date.now() - this.usageUpdatedAt) / 1000)}`
         : "";
     return `${formatUsageSnapshot(this.usageSnapshot, cfg.usage)}${stale}`;
   }
