@@ -96,6 +96,20 @@ const requireSettingsListTheme = (): SettingsListTheme => {
   return loadedSettingsListTheme;
 };
 
+class DynamicBorder {
+  readonly #color: (text: string) => string;
+
+  constructor(color: (text: string) => string = (str) => str) {
+    this.#color = color;
+  }
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    return [this.#color("\u2500".repeat(Math.max(1, width)))];
+  }
+}
+
 const COMMAND = "fast";
 const OPENAI_STATUS_COMMAND = "openai-usage";
 const OPENAI_SETTINGS_COMMAND = "openai-settings";
@@ -452,7 +466,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
         const current = currentItems();
         const selected = selectedItem();
         if (!closed) options?.onSelection?.(selected);
-        const lines = [title, "", `> ${searchQuery}`, ""];
+        const lines = [theme.label(title, true), "", `> ${searchQuery}`, ""];
         const maxVisible = 8;
         const startIndex = Math.max(
           0,
@@ -843,13 +857,14 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       await ctx.ui.custom((tui, theme, _kb, done) => {
         petController.setSettingsRenderRequest(() => tui.requestRender());
         const container = new Container();
+        container.addChild(new DynamicBorder((text) => theme.fg("border", text)));
         container.addChild(
           new (class {
             render(_width: number) {
               const cfg = config(ctx);
               return [
-                theme.fg("accent", theme.bold("Better OpenAI Settings")),
-                theme.fg("dim", cfg.configPath),
+                theme.bold(theme.fg("accent", "Better OpenAI Settings")),
+                theme.fg("muted", cfg.configPath),
                 "",
               ];
             }
@@ -873,6 +888,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
           { enableSearch: true },
         );
         container.addChild(settingsList);
+        container.addChild(new DynamicBorder((text) => theme.fg("border", text)));
         return {
           render(width: number) {
             return container.render(width);
