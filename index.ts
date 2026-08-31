@@ -1228,7 +1228,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       }
       const fast = fastController.statusSegment(ctx, cfg);
       const usage = usageController.statusLine(ctx, cfg);
-      setStatus(ctx, [fast, usage].filter(Boolean).join(" | ") || undefined);
+      setStatus(ctx, [fast, usage].filter(Boolean).join(" · ") || undefined);
       return;
     }
 
@@ -1252,7 +1252,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
     const fast = fastController.statusSegment(ctx, cfg);
     const usage = usageController.statusLine(ctx, cfg);
-    setStatusWidget(ctx, [fast, usage].filter(Boolean).join(" | ") || undefined);
+    setStatusWidget(ctx, [fast, usage].filter(Boolean).join(" · ") || undefined);
   }
 
   pi.on("session_start", (_event, ctx) => {
