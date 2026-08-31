@@ -24,15 +24,13 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
-          cache: pnpm
 
       - name: Verify release tag and package version
         env:
@@ -44,13 +42,13 @@ jobs:
           test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Run check
-        run: pnpm run check
+        run: bun run check
 
       - name: Run high-severity audit
-        run: pnpm audit --audit-level=high
+        run: bun audit --audit-level=high
 
       - name: Publish package
-        run: pnpm publish
+        run: npm publish

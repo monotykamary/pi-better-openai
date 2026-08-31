@@ -31,6 +31,9 @@
     "type": "git",
     "url": "git+https://github.com/monotykamary/pi-better-openai.git"
   },
+  "workspaces": [
+    "."
+  ],
   "files": [
     "index.ts",
     "src/",
@@ -43,7 +46,7 @@
     "access": "public"
   },
   "scripts": {
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm test",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint --deny-warnings index.ts src/*.ts src/*/*.ts tests/*.ts",
@@ -80,10 +83,18 @@
     "@oh-my-pi/pi-natives-linux-x64": "17.2.9",
     "@oh-my-pi/pi-natives-win32-x64": "17.2.9"
   },
+  "overrides": {
+    "@earendil-works/pi-agent-core": "0.84.4",
+    "@earendil-works/pi-ai": "0.84.4",
+    "brace-expansion": "5.0.9",
+    "nanoid": "3.3.18",
+    "postcss": "8.5.25",
+    "protobufjs": "7.6.5",
+    "undici": "8.10.0"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
-  "packageManager": "pnpm@11.20.0",
   "pi": {
     "extensions": [
       "./index.ts"

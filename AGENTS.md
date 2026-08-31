@@ -12,12 +12,12 @@
 Run the narrowest useful test first, then the full gate before committing:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm test -- tests/<file>.test.ts
-pnpm run check
+bun install --frozen-lockfile
+bun run test -- tests/<file>.test.ts
+bun run check
 ```
 
-`pnpm run check` runs typecheck, lint, format check, and all tests. Do not skip it for code changes.
+`bun run check` runs typecheck, lint, format check, and all tests. Do not skip it for code changes.
 
 ## Coding conventions
 
@@ -28,7 +28,7 @@ pnpm run check
 
 ## Release and publishing
 
-The release workflow publishes to npm from GitHub releases or manual dispatch after `pnpm install --frozen-lockfile`, `pnpm run check`, and `pnpm audit --audit-level=high`. Do not publish, tag, or push release commits unless the maintainer explicitly instructs you to.
+The release workflow publishes to npm from GitHub releases or manual dispatch after `bun install --frozen-lockfile`, `bun run check`, and `bun audit --audit-level=high`. Do not publish, tag, or push release commits unless the maintainer explicitly instructs you to.
 
 ## Security reminders
 
