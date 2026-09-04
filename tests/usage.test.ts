@@ -122,6 +122,7 @@ async function createUsageHarness(options: {
       handlers.set(event, currentHandlers);
     },
     registerFlag: vi.fn(),
+    registerProvider: vi.fn(),
     registerCommand: vi.fn((name: string, command: { handler: CommandHandler }) => {
       commands.set(name, command);
     }),

@@ -12,6 +12,7 @@
         "ws": "8.21.2",
       },
       "devDependencies": {
+        "@earendil-works/pi-ai": "0.85.0",
         "@earendil-works/pi-coding-agent": "0.85.0",
         "@earendil-works/pi-tui": "0.85.0",
         "@types/node": "~22.19.0",
@@ -30,6 +31,7 @@
         "@oh-my-pi/pi-natives-win32-x64": "17.2.9",
       },
       "peerDependencies": {
+        "@earendil-works/pi-ai": "*",
         "@earendil-works/pi-coding-agent": "*",
         "@earendil-works/pi-tui": "*",
       },

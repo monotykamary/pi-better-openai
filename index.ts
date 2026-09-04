@@ -12,6 +12,7 @@ import {
   SettingsList,
   type SettingsListTheme,
 } from "@earendil-works/pi-tui";
+import { registerOpenAICodexModels } from "./src/codex-models.ts";
 import { CONFIG_BASENAME, STATUS_KEY } from "./src/identity.ts";
 import {
   formatTokens,
@@ -209,6 +210,8 @@ function textPanel(title: string, lines: string[], done: () => void) {
 }
 
 export default function betterOpenAI(pi: ExtensionAPI): void {
+  registerOpenAICodexModels(pi);
+
   const fastController = new FastController(SERVICE_TIER);
   let cachedConfig: ResolvedConfig | undefined;
   let footerTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };

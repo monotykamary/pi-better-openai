@@ -61,6 +61,7 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
       handlers.set(event, currentHandlers);
     },
     registerFlag: vi.fn(),
+    registerProvider: vi.fn(),
     registerCommand: vi.fn((name: string, command: { handler: CommandHandler }) => {
       commands.set(name, command);
     }),

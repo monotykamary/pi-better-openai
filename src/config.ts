@@ -37,6 +37,7 @@ export const PET_STATES = [
 export const DEFAULT_SUPPORTED_MODELS = [
   "openai/gpt-5.4",
   "openai/gpt-5.5",
+  "openai-codex/gpt-6-astra",
   "openai-codex/gpt-5.6-sol",
   "openai-codex/gpt-5.6-terra",
   "openai-codex/gpt-5.6-luna",

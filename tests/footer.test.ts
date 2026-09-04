@@ -80,6 +80,7 @@ function createHarness(cwd: string): Harness {
       handlers.set(event, currentHandlers);
     },
     registerFlag: vi.fn(),
+    registerProvider: vi.fn(),
     registerCommand(name: string, command: { handler: CommandHandler }) {
       commands.set(name, command.handler);
     },

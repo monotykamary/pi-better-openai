@@ -57,6 +57,7 @@ describe("config helpers", () => {
     expect(_test.DEFAULT_SUPPORTED_MODELS).toEqual([
       "openai/gpt-5.4",
       "openai/gpt-5.5",
+      "openai-codex/gpt-6-astra",
       "openai-codex/gpt-5.6-sol",
       "openai-codex/gpt-5.6-terra",
       "openai-codex/gpt-5.6-luna",

@@ -29,6 +29,7 @@ Usage display, image generation, and live voice require pi's `openai-codex` OAut
 
 ## Features
 
+- GPT-6 Astra and Daybreak Blue/Red model fallbacks for the built-in `openai-codex` provider.
 - Fast mode for supported OpenAI models, toggled with `/fast` or in `/openai-settings`.
 - OpenAI subscription usage display via `/openai-usage` and the footer.
 - Interactive settings picker via `/openai-settings`.
@@ -61,6 +62,7 @@ Default supported models:
 [
   "openai/gpt-5.4",
   "openai/gpt-5.5",
+  "openai-codex/gpt-6-astra",
   "openai-codex/gpt-5.6-sol",
   "openai-codex/gpt-5.6-terra",
   "openai-codex/gpt-5.6-luna",
@@ -110,6 +112,12 @@ Example config:
   }
 }
 ```
+
+## Codex model fallbacks
+
+The extension adds `gpt-6-astra`, `gpt-daybreak-blue-latest`, and `gpt-daybreak-red-latest` to the built-in `openai-codex` provider without requiring local `models.json` entries. Existing built-in models remain available, and metadata from pi's live catalog takes precedence when pi publishes an official entry with the same ID.
+
+Daybreak models require separate OpenAI approval and provisioning. pi currently exposes reasoning levels through `max`; Codex's `ultra` automatic-delegation mode is not a pi thinking level.
 
 ## Live voice
 
