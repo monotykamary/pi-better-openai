@@ -4,6 +4,7 @@ export { AUTH_FILE, readCodexAuth } from "./codex-auth.ts";
 
 export type UsageWindow = {
   used_percent?: number | null;
+  limit_window_seconds?: number | null;
   reset_after_seconds?: number | null;
   reset_at?: number | null;
 };
@@ -112,14 +113,14 @@ function formatResetClock(
 }
 
 function formatCompactReset(
-  label: string,
+  label: string | undefined,
   seconds: number | null,
   options?: { includeDate?: boolean },
   now = Date.now(),
 ): string | null {
   const countdown = formatResetCountdown(seconds);
   const clock = formatResetClock(seconds, options, now);
-  return countdown && clock ? `${label} ↺ ${countdown} - ${clock}` : null;
+  return countdown && clock ? `${label ? `${label} ` : ""}↺ ${countdown} - ${clock}` : null;
 }
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -202,6 +203,16 @@ export function usageScopeForModel(modelId: string | undefined): UsageScope {
   return modelId === SPARK_MODEL_ID ? "spark" : "default";
 }
 
+function isWeeklyWindow(window: UsageWindow | null | undefined, now: number): boolean {
+  if (
+    typeof window?.limit_window_seconds === "number" &&
+    Number.isFinite(window.limit_window_seconds)
+  )
+    return window.limit_window_seconds >= 6 * 86_400;
+  const resetSeconds = getResetSeconds(window, now);
+  return resetSeconds !== null && resetSeconds > 5 * 3_600;
+}
+
 export function parseUsageSnapshot(
   data: CodexUsageResponse,
   modelId: string | undefined,
@@ -212,13 +223,18 @@ export function parseUsageSnapshot(
     scope === "spark"
       ? (findSparkRateLimitBucket(data) ?? normalizeRateLimitBucket(data.rate_limit))
       : normalizeRateLimitBucket(data.rate_limit);
+  const primaryWindow = bucket?.primary_window;
+  const secondaryWindow = bucket?.secondary_window;
+  const weeklyOnly = !secondaryWindow && isWeeklyWindow(primaryWindow, now);
   return {
     capturedAt: now,
     scope,
-    fiveHourLeftPercent: usedToLeftPercent(bucket?.primary_window?.used_percent),
-    sevenDayLeftPercent: usedToLeftPercent(bucket?.secondary_window?.used_percent),
-    fiveHourResetInSeconds: getResetSeconds(bucket?.primary_window, now),
-    sevenDayResetInSeconds: getResetSeconds(bucket?.secondary_window, now),
+    fiveHourLeftPercent: weeklyOnly ? null : usedToLeftPercent(primaryWindow?.used_percent),
+    sevenDayLeftPercent: usedToLeftPercent(
+      weeklyOnly ? primaryWindow?.used_percent : secondaryWindow?.used_percent,
+    ),
+    fiveHourResetInSeconds: weeklyOnly ? null : getResetSeconds(primaryWindow, now),
+    sevenDayResetInSeconds: getResetSeconds(weeklyOnly ? primaryWindow : secondaryWindow, now),
     isLimited: bucket?.limit_reached === true || bucket?.allowed === false,
   };
 }
@@ -234,25 +250,40 @@ export function formatUsageSnapshot(
   options: { showResetTimes: boolean },
   now = Date.now(),
 ): string {
-  const fiveHour = formatPercent(snapshot.fiveHourLeftPercent);
-  const sevenDay = formatPercent(snapshot.sevenDayLeftPercent);
+  const windows = [
+    {
+      label: "5h",
+      percent: snapshot.fiveHourLeftPercent,
+      resetSeconds: snapshot.fiveHourResetInSeconds,
+      includeDate: false,
+    },
+    {
+      label: "7d",
+      percent: snapshot.sevenDayLeftPercent,
+      resetSeconds: snapshot.sevenDayResetInSeconds,
+      includeDate: true,
+    },
+  ];
+  const availableWindows = windows.filter(
+    (window) => window.percent !== null || window.resetSeconds !== null,
+  );
+  const displayedWindows = availableWindows.length > 0 ? availableWindows : windows;
+  const usage = displayedWindows
+    .map((window) => `${window.label}: ${formatPercent(window.percent)}`)
+    .join(" · ");
   const resets = options.showResetTimes
-    ? [
-        formatCompactReset(
-          "5h",
-          remainingResetSeconds(snapshot.fiveHourResetInSeconds, snapshot.capturedAt, now),
-          undefined,
-          now,
-        ),
-        formatCompactReset(
-          "7d",
-          remainingResetSeconds(snapshot.sevenDayResetInSeconds, snapshot.capturedAt, now),
-          { includeDate: true },
-          now,
-        ),
-      ].filter((value): value is string => value !== null)
+    ? displayedWindows
+        .map((window) =>
+          formatCompactReset(
+            displayedWindows.length > 1 ? window.label : undefined,
+            remainingResetSeconds(window.resetSeconds, snapshot.capturedAt, now),
+            window.includeDate ? { includeDate: true } : undefined,
+            now,
+          ),
+        )
+        .filter((value): value is string => value !== null)
     : [];
-  return `Usage: 5h: ${fiveHour} · 7d: ${sevenDay}${resets.length ? ` · ${resets.join(" · ")}` : ""}`;
+  return `Usage: ${usage}${resets.length ? ` · ${resets.join(" · ")}` : ""}`;
 }
 
 function remainingResetSeconds(

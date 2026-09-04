@@ -220,6 +220,51 @@ describe("usage helpers", () => {
     );
   });
 
+  test("formats a weekly-only primary window as 7d usage", () => {
+    const capturedAt = new Date("2026-07-09T12:00:00Z").getTime();
+    const usage = _test.parseUsageSnapshot(
+      {
+        rate_limit: {
+          primary_window: {
+            used_percent: 58,
+            limit_window_seconds: 7 * 86_400,
+            reset_after_seconds: 2 * 86_400 + 6 * 3_600,
+          },
+        },
+      },
+      "gpt-5.5",
+      capturedAt,
+    );
+
+    expect(usage.fiveHourLeftPercent).toBeNull();
+    expect(usage.sevenDayLeftPercent).toBe(42);
+    expect(_test.formatUsageSnapshot(usage, { showResetTimes: true }, capturedAt)).toMatch(
+      /^Usage: 7d: 42% · ↺ 2d6h - /,
+    );
+  });
+
+  test("infers a weekly-only primary window from a reset beyond five hours", () => {
+    const usage = _test.parseUsageSnapshot(
+      {
+        rate_limit: {
+          primary_window: { used_percent: 58, reset_after_seconds: 2 * 86_400 },
+        },
+      },
+      "gpt-5.5",
+    );
+
+    expect(_test.formatUsageSnapshot(usage, { showResetTimes: false })).toBe("Usage: 7d: 42%");
+  });
+
+  test("renders a primary five-hour window without an unavailable weekly placeholder", () => {
+    const usage = _test.parseUsageSnapshot(
+      { rate_limit: { primary_window: { used_percent: 10, reset_after_seconds: 3_600 } } },
+      "gpt-5.5",
+    );
+
+    expect(_test.formatUsageSnapshot(usage, { showResetTimes: false })).toBe("Usage: 5h: 90%");
+  });
+
   test("decrements reset countdowns without moving the reset clock", () => {
     const capturedAt = new Date("2026-07-09T12:00:00Z").getTime();
     const usage = _test.parseUsageSnapshot(
@@ -244,10 +289,10 @@ describe("usage helpers", () => {
       capturedAt + 90 * 60_000,
     );
 
-    expect(initial).toContain("5h ↺ 1h0m");
-    expect(later).toContain("5h ↺ 30m");
+    expect(initial).toContain("↺ 1h0m");
+    expect(later).toContain("↺ 30m");
     expect(initial.split(" - ")[1]).toBe(later.split(" - ")[1]);
-    expect(expired).toContain("5h ↺ 0s");
+    expect(expired).toContain("↺ 0s");
     expect(initial.split(" - ")[1]).toBe(expired.split(" - ")[1]);
   });
 
