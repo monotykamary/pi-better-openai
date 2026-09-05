@@ -71,6 +71,7 @@ import {
 } from "./src/pets.ts";
 import { FastController, modelList, supportsFast } from "./src/fast-controller.ts";
 import { UsageController } from "./src/usage-controller.ts";
+import { parsePresentationAction, resolvePresentationVisible } from "./src/presentation.ts";
 import { PetFooterController } from "./src/pet-footer-controller.ts";
 import {
   abbreviateHomePath,
@@ -114,6 +115,7 @@ class DynamicBorder {
 const COMMAND = "fast";
 const OPENAI_STATUS_COMMAND = "openai-usage";
 const OPENAI_SETTINGS_COMMAND = "openai-settings";
+const USAGE_PRESENTATION_COMMAND = "openai-usage-presentation";
 const FLAG = "fast";
 const PET_EMPTY_VALUE = "not selected";
 const SERVICE_TIER = "priority";
@@ -218,6 +220,9 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   let footerInstalled = false;
   let statusInstalled = false;
   let statusWidgetInstalled = false;
+  // Transient veil: hides all Better OpenAI footer pixels without stopping usage fetch.
+  // Always starts visible; reset on session_start. Never persisted to config.
+  let usagePresentationVisible = true;
   let contextUsageCached = false;
   let cachedContextUsage: ReturnType<ExtensionContext["getContextUsage"]>;
   let cachedContextLeafId: string | null | undefined;
@@ -363,6 +368,30 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     description: "Show OpenAI subscription usage status",
     handler: async (_args, ctx) => {
       await usageController.refresh(ctx, ctx.model?.id, { notify: true, force: true });
+    },
+  });
+
+  pi.registerCommand(USAGE_PRESENTATION_COMMAND, {
+    description: "Hide/show Better OpenAI footer presence without stopping usage fetch (hide|show)",
+    handler: async (args, ctx) => {
+      const parsed = parsePresentationAction(args);
+      const nextVisible = resolvePresentationVisible(parsed.action, usagePresentationVisible);
+      if (nextVisible === usagePresentationVisible) {
+        ctx.ui.notify(
+          nextVisible
+            ? "Better OpenAI footer already shown."
+            : "Better OpenAI footer already hidden.",
+          "info",
+        );
+        return;
+      }
+      usagePresentationVisible = nextVisible;
+      updateFooter(ctx);
+      const hint = parsed.valid ? "" : " (use hide|show)";
+      ctx.ui.notify(
+        nextVisible ? `Better OpenAI footer shown.${hint}` : `Better OpenAI footer hidden.${hint}`,
+        "info",
+      );
     },
   });
 
@@ -1222,6 +1251,12 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   }
 
   function updateFooter(ctx: ExtensionContext): void {
+    if (!usagePresentationVisible) {
+      setStatus(ctx, undefined);
+      setStatusWidget(ctx, undefined);
+      if (hasTerminalUI(ctx)) clearFooter(ctx);
+      return;
+    }
     const cfg = config(ctx);
 
     if (!hasTerminalUI(ctx)) {
@@ -1259,6 +1294,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", (_event, ctx) => {
+    usagePresentationVisible = true;
     invalidateContextUsage();
     invalidateSessionName();
     const nextConfig = refresh(ctx);
@@ -1361,6 +1397,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 }
 
 export const _test = {
+  USAGE_PRESENTATION_COMMAND,
   CONFIG_BASENAME,
   DEFAULT_SUPPORTED_MODELS,
   DEFAULT_CONFIG,
