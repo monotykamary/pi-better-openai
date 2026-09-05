@@ -45,7 +45,27 @@ Usage display, image generation, and live voice require pi's `openai-codex` OAut
   - `/live` starts or stops realtime voice mode. `Ctrl+Shift+L` is the keyboard toggle.
   - `/pets [help|list|wake [slug]|tuck|select <slug>]` renders or manages custom pets from `${CODEX_HOME:-~/.codex}/pets`.
   - `/openai-usage` shows current OpenAI subscription usage.
+  - `/openai-usage-presentation [hide|show|toggle]` controls transient footer visibility.
   - `/openai-settings` opens settings, diagnostics, and config details.
+
+## Presentation visibility
+
+`/openai-usage-presentation hide` removes all Better OpenAI footer presentation:
+status text, the below-editor widget, and the replacement footer including pets.
+`show` lifts this gate and restores whatever the current configuration allows; it
+does not enable disabled usage, footer, or pet settings. Repeated `hide` or `show`
+requests are idempotent. With no argument (or `toggle`), visibility flips. Unknown
+arguments also toggle and display a usage hint.
+
+This is a presentation-only control. Usage polling continues while hidden, and
+showing the footer uses the latest available snapshot. It does not hide tool
+output or the explicit `/openai-usage` response. Commands emit normal UI notices.
+
+Visibility is never written to configuration and resets to **visible** on every
+`session_start`, including reloads and session changes. Extensions coordinating a
+veil should send explicit `hide`/`show` actions, not `toggle`, and reapply their
+state after session initialization. No knowledge of Better OpenAI's rendering
+internals is required.
 
 ## Configuration
 
