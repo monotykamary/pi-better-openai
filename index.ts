@@ -1497,12 +1497,14 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     fastController.applyDesiredState(ctx, cfg);
     if (fastController.active !== wasActive) {
       persist(cfg);
-      ctx.ui.notify(
-        fastController.active
-          ? fastController.stateText(ctx, cfg)
-          : fastController.inactiveForModelMessage(ctx),
-        fastController.active ? "info" : "warning",
-      );
+      if (cfg.notifyOnModelSwitch) {
+        ctx.ui.notify(
+          fastController.active
+            ? fastController.stateText(ctx, cfg)
+            : fastController.inactiveForModelMessage(ctx),
+          fastController.active ? "info" : "warning",
+        );
+      }
     }
     updateFooter(ctx);
     void usageController.refresh(ctx, event.model.id, { force: true });

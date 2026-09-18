@@ -77,6 +77,7 @@ Example config:
 ```json
 {
   "persistState": true,
+  "notifyOnModelSwitch": true,
   "desiredActive": false,
   "supportedModels": ["openai/gpt-5.5", "openai-codex/gpt-5.5"],
   "usage": {

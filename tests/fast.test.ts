@@ -203,6 +203,50 @@ describe("fast mode provider injection", () => {
     });
   });
 
+  test("model selection notifies by default when fast mode turns off", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, {
+      active: true,
+      desiredActive: true,
+      supportedModels: ["openai/gpt-5.5"],
+    });
+    const harness = createHarness(cwd);
+
+    await emit(harness, "session_start");
+    harness.ctx.model = createModel("openai", "gpt-4.1");
+    await emit(harness, "model_select", { model: harness.ctx.model });
+
+    expect(harness.ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Fast mode inactive"),
+      "warning",
+    );
+  });
+
+  test("notifyOnModelSwitch=false keeps model switches quiet while still toggling injection", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, {
+      active: true,
+      desiredActive: true,
+      notifyOnModelSwitch: false,
+      supportedModels: ["openai/gpt-5.5"],
+    });
+    const harness = createHarness(cwd);
+
+    await emit(harness, "session_start");
+    vi.mocked(harness.ctx.ui.notify).mockClear();
+    harness.ctx.model = createModel("openai", "gpt-4.1");
+    await emit(harness, "model_select", { model: harness.ctx.model });
+    await expect(beforeProviderRequest(harness, { model: "gpt-4.1" })).resolves.toBeUndefined();
+
+    harness.ctx.model = createModel("openai", "gpt-5.5");
+    await emit(harness, "model_select", { model: harness.ctx.model });
+    await expect(beforeProviderRequest(harness, { model: "gpt-5.5" })).resolves.toMatchObject({
+      service_tier: "priority",
+    });
+
+    expect(harness.ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
   test("model selection deactivates injection for unsupported models and reactivates for supported models", async () => {
     const cwd = createTempProject();
     writeProjectConfig(cwd, {

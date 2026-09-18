@@ -16,6 +16,7 @@ export function makeResolvedConfig(overrides: Partial<ResolvedConfig> = {}): Res
     projectConfigExists: false,
     globalConfigExists: false,
     persistState: true,
+    notifyOnModelSwitch: true,
     active: false,
     desiredActive: false,
     supportedModels: [],

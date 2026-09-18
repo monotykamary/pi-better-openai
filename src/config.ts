@@ -102,6 +102,7 @@ export type PetConfig = {
 
 export interface ConfigFile {
   persistState?: boolean;
+  notifyOnModelSwitch?: boolean;
   active?: boolean;
   desiredActive?: boolean;
   supportedModels?: string[];
@@ -125,6 +126,7 @@ export interface ResolvedConfig {
   projectConfigExists: boolean;
   globalConfigExists: boolean;
   persistState: boolean;
+  notifyOnModelSwitch: boolean;
   active: boolean;
   desiredActive: boolean;
   supportedModels: SupportedModel[];
@@ -191,6 +193,7 @@ export const DEFAULT_PET_CONFIG: Required<PetConfig> = {
 
 export const DEFAULT_CONFIG: ConfigFile = {
   persistState: true,
+  notifyOnModelSwitch: true,
   active: false,
   desiredActive: false,
   supportedModels: [...DEFAULT_SUPPORTED_MODELS],
@@ -239,6 +242,17 @@ export const FAST_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     currentValue: (cfg) => String(cfg.persistState),
     values: ["true", "false"],
     description: "Remember fast-mode state across sessions.",
+    parse: booleanSetting,
+  },
+  {
+    id: "notifyOnModelSwitch",
+    section: "root",
+    key: "notifyOnModelSwitch",
+    label: "Notify on model switch",
+    currentValue: (cfg) => String(cfg.notifyOnModelSwitch),
+    values: ["true", "false"],
+    description:
+      "Show a notification when switching models turns fast mode on or off. Disable to keep automatic model switches quiet.",
     parse: booleanSetting,
   },
 ];
@@ -628,6 +642,8 @@ export function readConfig(path: string): ConfigFile | undefined {
   const parsed = readRawConfig(path);
   const config: ConfigFile = {};
   if (typeof parsed.persistState === "boolean") config.persistState = parsed.persistState;
+  if (typeof parsed.notifyOnModelSwitch === "boolean")
+    config.notifyOnModelSwitch = parsed.notifyOnModelSwitch;
   if (typeof parsed.active === "boolean") config.active = parsed.active;
   if (typeof parsed.desiredActive === "boolean") config.desiredActive = parsed.desiredActive;
   const supportedModels = normalizeModelKeys(parsed.supportedModels);
@@ -801,6 +817,7 @@ export function resolveConfig(cwd: string): ResolvedConfig {
     projectConfigExists,
     globalConfigExists,
     persistState: merged.persistState ?? true,
+    notifyOnModelSwitch: merged.notifyOnModelSwitch ?? true,
     active: merged.active ?? desiredActive,
     desiredActive,
     supportedModels:
