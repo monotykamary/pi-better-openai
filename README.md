@@ -109,7 +109,11 @@ Example config:
     "enabled": true,
     "refreshIntervalMs": 60000,
     "showOnlyOnSubscriptionModels": true,
+    "style": "detailed",
+    "windows": "all",
+    "resetFormat": "both",
     "showResetTimes": true,
+    "showBankedResets": true,
     "autoRedeemBankedResets": true
   },
   "footer": {
@@ -142,6 +146,36 @@ Example config:
 ```
 
 Setting `image.enabled`, `websearch.enabled`, or `decisions.enabled` to `false` hides that tool and removes its system-prompt guidance, including from pi-fabric capture. Changes in `/openai-settings` or `/openai-decisions` apply immediately; use `/reload` after editing config files manually. Configuration commands remain available.
+
+## Usage display and footer modes
+
+`footer.mode` defaults to `status`: usage is published through pi's public `ctx.ui.setStatus` API, leaving the host footer intact. The footer owner controls its placement; `status` no longer adds a separate below-editor widget. Saved `replace` selections remain unchanged. `replace` is opt-in and installs the custom Better OpenAI footer. If another extension replaces it, Better OpenAI falls back to publishing status instead of reclaiming the footer; switch away from `replace` and back to enable it again. Pets require `replace`; enabling a pet does not capture the footer in `status` or `off`. `off` disables Better OpenAI footer/status output and never captures the footer.
+
+Usage display settings are available in `/openai-settings` and JSON:
+
+- `usage.style`: `detailed` (default) or `compact`. Compact uses `W` for weekly quota and `5h` for five-hour quota, without a `Usage:` prefix.
+- `usage.windows`: `all` (default), `weekly`, or `five-hour`. Missing windows are omitted when another selected window is available; unavailable quota is `--`, not zero.
+- `usage.resetFormat`: `both` (default), `countdown`, or `clock` (local reset time).
+- `usage.showResetTimes`: the backward-compatible master toggle; `false` hides resets regardless of reset format.
+- `usage.showBankedResets`: controls the banked-reset suffix independently of automatic redemption.
+
+For exactly `W:70% 5d12h` when weekly remaining quota is 70% and its reset is 5 days 12 hours away, use:
+
+```json
+{
+  "footer": { "mode": "status" },
+  "usage": {
+    "enabled": true,
+    "style": "compact",
+    "windows": "weekly",
+    "resetFormat": "countdown",
+    "showResetTimes": true,
+    "showBankedResets": false
+  }
+}
+```
+
+Percentages remain severity-colored, and countdowns adjust for elapsed time since the last fetch. `/openai-usage` retains detailed output for all available windows regardless of display style/window/reset-format settings; it still honors `showResetTimes` and `showBankedResets`.
 
 ## Service tiers
 
@@ -309,7 +343,7 @@ Codex pets are an OpenAI Codex app feature, so the floating overlay and pet pick
 /pets list          # list local custom pets and readiness diagnostics
 ```
 
-You can also enable **Footer pet** in `/openai-settings`, cycle installed pets with the **Pet** row, preview the selected pet in the footer, and tune placement (`inline-right` by default), idle, thinking/streaming, tool-execution, and any failed-tool animation states, plus random idle emotes and size.
+Set `footer.mode` to `replace` first (pets do not render in `status` or `off`). You can also enable **Footer pet** in `/openai-settings`, cycle installed pets with the **Pet** row, preview the selected pet in the footer, and tune placement (`inline-right` by default), idle, thinking/streaming, tool-execution, and any failed-tool animation states, plus random idle emotes and size.
 
 To create a custom pet for the Codex app:
 

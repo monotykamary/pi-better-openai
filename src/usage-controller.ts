@@ -119,7 +119,7 @@ export class UsageController {
       ctx.model?.provider === "openai"
         ? "Codex account (not verified against the active OpenAI login; OpenAI usage: https://chatgpt.com/settings/usage). "
         : "";
-    return `${source}${formatUsageSnapshot(this.usageSnapshot, cfg.usage)}${stale}`;
+    return `${source}${formatUsageSnapshot(this.usageSnapshot, { showResetTimes: cfg.usage.showResetTimes, showBankedResets: cfg.usage.showBankedResets })}${stale}`;
   }
 
   formatDebug(ctx: ExtensionContext): string {

@@ -2,9 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import betterOpenAI, { _test } from "../index.ts";
 import { stripAnsi } from "../src/format.ts";
+import * as usageApi from "../src/usage.ts";
+import { PetFooterController } from "../src/pet-footer-controller.ts";
 
 type EventHandler = (event: unknown, ctx: ExtensionContext) => void | Promise<void>;
 type CommandHandler = (args: string, ctx: ExtensionContext) => void | Promise<void>;
@@ -47,7 +49,7 @@ function writeProjectConfig(
         active: false,
         desiredActive: false,
         supportedModels: [],
-        usage: { enabled: false },
+        usage: { enabled: false, autoRedeemBankedResets: false },
         footer: { mode: footerMode },
         image: { enabled: false },
         pets: { enabled: false },
@@ -104,6 +106,7 @@ function createHarness(cwd: string): Harness {
       setFooter,
       setStatus,
       setWidget,
+      theme: { fg: (_color: string, text: string) => text },
     },
     sessionManager: {
       getEntries,
@@ -142,7 +145,13 @@ async function emit(harness: Harness, event: string, payload: unknown = {}) {
   }
 }
 
+beforeEach(() => {
+  vi.stubEnv("PI_CODING_AGENT_DIR", createTempProject());
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   for (const tempDir of tempDirs.splice(0)) {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -175,6 +184,21 @@ describe("diagnostic text panel", () => {
 });
 
 describe("footer pet layout", () => {
+  test("requires an owned replace footer even when the pet is enabled", () => {
+    const cwd = createTempProject();
+    const cfg = _test.resolveConfig(cwd);
+    cfg.pets.enabled = true;
+    const pet = new PetFooterController(
+      () => cfg,
+      () => {},
+    );
+    expect(pet.shouldRenderInFooter(cfg, true)).toBe(false);
+    cfg.footer.mode = "off";
+    expect(pet.shouldRenderInFooter(cfg, true)).toBe(false);
+    cfg.footer.mode = "replace";
+    expect(pet.shouldRenderInFooter(cfg, false)).toBe(false);
+    expect(pet.shouldRenderInFooter(cfg, true)).toBe(true);
+  });
   test("keeps terminal-image pets on the left for inline-left placement", () => {
     const imageLine = "\x1b[1A\x1b_Ga=p,i=1\x1b\\\x1b[1B";
 
@@ -195,6 +219,89 @@ describe("footer pet layout", () => {
 });
 
 describe("footer mode ownership", () => {
+  test("defaults to status and leaves an existing footer untouched", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, "status", { footer: {} });
+    const h = createHarness(cwd);
+    await emit(h, "session_start");
+    await emit(h, "agent_end");
+    expect(h.setFooter).not.toHaveBeenCalled();
+    expect(h.setWidget).not.toHaveBeenCalled();
+  });
+
+  test.each(["status", "off"] as const)(
+    "an enabled pet cannot capture the footer in %s mode",
+    async (mode) => {
+      const cwd = createTempProject();
+      writeProjectConfig(cwd, mode, { pets: { enabled: true, slug: "missing-test-pet" } });
+      const h = createHarness(cwd);
+      await emit(h, "session_start");
+      await emit(h, "agent_end");
+      expect(h.setFooter).not.toHaveBeenCalled();
+      expect(h.setWidget).not.toHaveBeenCalled();
+      await emit(h, "session_shutdown");
+    },
+  );
+
+  test("publishes compact quota to the shared status map and removes it when hidden", async () => {
+    vi.spyOn(usageApi, "requestCodexUsage").mockResolvedValue({
+      rate_limit: { secondary_window: { used_percent: 30, reset_after_seconds: 475200 } },
+    });
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, "status", {
+      usage: {
+        enabled: true,
+        autoRedeemBankedResets: false,
+        style: "compact",
+        windows: "weekly",
+        resetFormat: "countdown",
+        showBankedResets: false,
+      },
+    });
+    const h = createHarness(cwd);
+    h.ctx.model = { provider: "openai", id: "gpt-5.4" } as ExtensionContext["model"];
+    h.ctx.modelRegistry.isUsingOAuth = vi.fn(() => true);
+    const statuses = new Map([["other-extension", "keep me"]]);
+    h.setStatus.mockImplementation((key: string, text: string | undefined) => {
+      if (text === undefined) statuses.delete(key);
+      else statuses.set(key, text);
+    });
+    await emit(h, "session_start");
+    await vi.waitFor(() => expect(statuses.get("better-openai")).toBe("Codex W:70% 5d12h"));
+    expect(h.setFooter).not.toHaveBeenCalled();
+    expect(h.setWidget).not.toHaveBeenCalled();
+    h.ctx.model = undefined;
+    await emit(h, "agent_end");
+    expect(statuses.has("better-openai")).toBe(false);
+    expect(statuses.get("other-extension")).toBe("keep me");
+    await emit(h, "session_shutdown");
+  });
+
+  test("a displaced replace footer yields until its mode is explicitly changed", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, "replace", {
+      persistState: true,
+      serviceTier: "fast",
+      supportedModels: ["openai/gpt-5.4"],
+    });
+    const h = createHarness(cwd);
+    h.ctx.model = { provider: "openai", id: "gpt-5.4" } as ExtensionContext["model"];
+    await emit(h, "session_start");
+    const display = h.setFooter.mock.calls[0]![0]({ requestRender: vi.fn() }, {}, {});
+    display.dispose();
+    await emit(h, "agent_start");
+    await emit(h, "agent_end");
+    expect(h.setStatus).toHaveBeenLastCalledWith("better-openai", "gpt-5.4 fast");
+    await emit(h, "session_start");
+    expect(h.setFooter).toHaveBeenCalledTimes(1);
+    writeProjectConfig(cwd, "status");
+    await emit(h, "session_start");
+    expect(h.setFooter).toHaveBeenCalledTimes(1);
+    writeProjectConfig(cwd, "replace");
+    await emit(h, "session_start");
+    expect(h.setFooter).toHaveBeenCalledTimes(2);
+  });
+
   test.each(["replace", "status"] as const)(
     "shows Ultrafast accurately in %s mode",
     async (mode) => {
@@ -210,12 +317,14 @@ describe("footer mode ownership", () => {
       } as ExtensionContext["model"];
       await emit(h, "session_start");
       const theme = { fg: (_color: string, value: string) => value };
-      const display =
-        mode === "replace"
-          ? h.setFooter.mock.calls[0]![0]({ requestRender: vi.fn() }, theme, {})
-          : h.setWidget.mock.calls[0]![1]({}, theme);
-      expect(display.render(100).map(stripAnsi).join("\n")).toContain("gpt-6-astra ultrafast");
-      display.dispose?.();
+      if (mode === "replace") {
+        const display = h.setFooter.mock.calls[0]![0]({ requestRender: vi.fn() }, theme, {});
+        expect(display.render(100).map(stripAnsi).join("\n")).toContain("gpt-6-astra ultrafast");
+        display.dispose();
+      } else {
+        expect(h.setStatus).toHaveBeenLastCalledWith("better-openai", "gpt-6-astra ultrafast");
+        expect(h.setWidget).not.toHaveBeenCalled();
+      }
     },
   );
 
@@ -368,7 +477,7 @@ describe("footer mode ownership", () => {
     expect(harness.setStatus).not.toHaveBeenCalled();
   });
 
-  test("status mode renders dimmed text on its own line without replacing the footer", async () => {
+  test("status mode publishes through setStatus without replacing the footer or adding a widget", async () => {
     const cwd = createTempProject();
     writeProjectConfig(cwd, "status", {
       persistState: true,
@@ -382,24 +491,15 @@ describe("footer mode ownership", () => {
       id: "gpt-5.6",
       reasoning: true,
     } as ExtensionContext["model"];
-
     await emit(harness, "session_start");
-
     expect(harness.setFooter).not.toHaveBeenCalled();
-    expect(harness.setStatus).not.toHaveBeenCalled();
-    expect(harness.setWidget).toHaveBeenCalledTimes(1);
-    expect(harness.setWidget.mock.calls[0]?.[2]).toEqual({ placement: "belowEditor" });
+    expect(harness.setWidget).not.toHaveBeenCalled();
+    expect(harness.setStatus).toHaveBeenLastCalledWith("better-openai", "gpt-5.6 fast");
 
-    const widgetFactory = harness.setWidget.mock.calls[0]?.[1];
-    const widget = widgetFactory(
-      {},
-      {
-        fg: (color: string, value: string) => (color === "dim" ? `\x1b[2m${value}\x1b[22m` : value),
-      },
-    );
-    const lines = widget.render(100);
-    expect(lines.map(stripAnsi)).toEqual(["gpt-5.6 fast"]);
-    expect(lines[0]?.startsWith("\x1b[2m")).toBe(true);
+    writeProjectConfig(cwd, "off");
+    await emit(harness, "session_start");
+    expect(harness.setStatus).toHaveBeenLastCalledWith("better-openai", undefined);
+    expect(harness.setFooter).not.toHaveBeenCalled();
   });
 
   test("off mode clears the Better OpenAI footer only after Better OpenAI installed it", async () => {

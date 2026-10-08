@@ -17,6 +17,10 @@ export function isServiceTier(value: unknown): value is ServiceTier {
   return typeof value === "string" && (SERVICE_TIERS as readonly string[]).includes(value);
 }
 
+export const USAGE_STYLES = ["detailed", "compact"] as const;
+export const USAGE_WINDOWS = ["all", "weekly", "five-hour"] as const;
+export const USAGE_RESET_FORMATS = ["both", "countdown", "clock"] as const;
+
 export const FOOTER_MODES = ["replace", "status", "off"] as const;
 export const IMAGE_SAVE_MODES = ["none", "project", "global", "custom"] as const;
 export const IMAGE_OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const;
@@ -103,6 +107,9 @@ export type PetPlacement = (typeof PET_PLACEMENTS)[number];
 export type PetState = (typeof PET_STATES)[number];
 
 export type UsageConfig = {
+  style?: (typeof USAGE_STYLES)[number];
+  windows?: (typeof USAGE_WINDOWS)[number];
+  resetFormat?: (typeof USAGE_RESET_FORMATS)[number];
   enabled?: boolean;
   refreshIntervalMs?: number;
   showOnlyOnSubscriptionModels?: boolean;
@@ -199,6 +206,9 @@ export interface ResolvedConfig {
 }
 
 export const DEFAULT_USAGE_CONFIG: Required<UsageConfig> = {
+  style: "detailed",
+  windows: "all",
+  resetFormat: "both",
   enabled: true,
   refreshIntervalMs: 60_000,
   showOnlyOnSubscriptionModels: true,
@@ -208,7 +218,7 @@ export const DEFAULT_USAGE_CONFIG: Required<UsageConfig> = {
 };
 
 export const DEFAULT_FOOTER_CONFIG: Required<FooterConfig> = {
-  mode: "replace",
+  mode: "status",
 };
 
 export const IMAGE_MODEL_CHOICES = ["gpt-image-2.5", "gpt-image-2"] as const;
@@ -347,12 +357,42 @@ export const FOOTER_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     currentValue: (cfg) => cfg.footer.mode,
     values: FOOTER_MODES,
     description:
-      "replace = custom footer, status = pi footer plus status line, off = no Better OpenAI footer/status unless Footer pet is enabled.",
+      "replace = opt-in custom footer (required for pets), status = pi footer plus public status API, off = no Better OpenAI footer/status and never captures the footer.",
     parse: stringSetting,
   },
 ];
 
 export const USAGE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
+  {
+    id: "usage.style",
+    section: "usage",
+    key: "style",
+    label: "Usage style",
+    currentValue: (cfg) => cfg.usage.style,
+    values: USAGE_STYLES,
+    description: "Detailed labels or compact quota display.",
+    parse: stringSetting,
+  },
+  {
+    id: "usage.windows",
+    section: "usage",
+    key: "windows",
+    label: "Usage windows",
+    currentValue: (cfg) => cfg.usage.windows,
+    values: USAGE_WINDOWS,
+    description: "Display all available windows, weekly only, or five-hour only.",
+    parse: stringSetting,
+  },
+  {
+    id: "usage.resetFormat",
+    section: "usage",
+    key: "resetFormat",
+    label: "Usage reset format",
+    currentValue: (cfg) => cfg.usage.resetFormat,
+    values: USAGE_RESET_FORMATS,
+    description: "Show countdowns, local reset clocks, or both when reset times are enabled.",
+    parse: stringSetting,
+  },
   {
     id: "usage.enabled",
     section: "usage",
@@ -563,7 +603,7 @@ export const PET_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     currentValue: (cfg) => String(cfg.pets.enabled),
     values: ["true", "false"],
     description:
-      "Render a custom Codex pet from ${CODEX_HOME:-~/.codex}/pets in the Better OpenAI footer.",
+      "Render a custom Codex pet from ${CODEX_HOME:-~/.codex}/pets in the Better OpenAI footer; requires footer.mode = replace.",
     parse: booleanSetting,
   },
   {
@@ -801,6 +841,21 @@ export function readConfig(path: string): ConfigFile | undefined {
   if (supportedModels !== undefined) config.supportedModels = supportedModels;
   if (isRecord(parsed.usage)) {
     config.usage = {};
+    if (
+      typeof parsed.usage.style === "string" &&
+      (USAGE_STYLES as readonly string[]).includes(parsed.usage.style)
+    )
+      config.usage.style = parsed.usage.style as Required<UsageConfig>["style"];
+    if (
+      typeof parsed.usage.windows === "string" &&
+      (USAGE_WINDOWS as readonly string[]).includes(parsed.usage.windows)
+    )
+      config.usage.windows = parsed.usage.windows as Required<UsageConfig>["windows"];
+    if (
+      typeof parsed.usage.resetFormat === "string" &&
+      (USAGE_RESET_FORMATS as readonly string[]).includes(parsed.usage.resetFormat)
+    )
+      config.usage.resetFormat = parsed.usage.resetFormat as Required<UsageConfig>["resetFormat"];
     if (typeof parsed.usage.enabled === "boolean") config.usage.enabled = parsed.usage.enabled;
     if (typeof parsed.usage.refreshIntervalMs === "number")
       config.usage.refreshIntervalMs = parsed.usage.refreshIntervalMs;
