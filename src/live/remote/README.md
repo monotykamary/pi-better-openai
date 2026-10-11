@@ -36,17 +36,17 @@ for credentials, attestation or audio, and unknown fields are rejected.
 | unset, empty         | this computer. Nothing is looked up: no `ss`, no Tailscale, no process is read.                                                                                                  |
 | a host               | that SSH host, trusted to be the computer meant: only its `hello` (version) is checked                                                                                           |
 | `auto`, not in Herdr | no SSH variables: this computer; `SSH_CONNECTION`: the computer it came from (Tailscale); `SSH_CLIENT`/`SSH_TTY` alone, or tmux/screen/zellij with any SSH variable: **refuses** |
-| `auto`, in Herdr     | the one computer attached to the pane's Herdr server; **refuses** when several are attached, or when it cannot tell (below)                                                      |
+| `auto`, in Herdr     | the one computer attached to the pane's Herdr server; **asks** which one when several are attached, **refuses** when it cannot tell (below)                                      |
 
 Inside Herdr (`HERDR_PANE_ID` set) Pi's own `SSH_*` variables are ignored: a pane carries the
 environment of the Herdr server, not of whoever is typing. By the computer running Pi:
 
-| B (runs Pi)                                    | `auto` outside Herdr  | `auto` in a Herdr pane                                                                     |
-| ---------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------ |
-| Linux with `ss`                                | as in the table above | reads the server's clients (below): one computer is it, several or unrecognized **refuse** |
-| Linux without `ss`, or a pane without a socket | as above              | this computer if no remote Herdr client is running, else **refuses**                       |
-| macOS                                          | as above              | this computer if no remote Herdr client is running, else **refuses**                       |
-| Windows                                        | as above              | the same, from a PowerShell process list (not yet run on a real Windows)                   |
+| B (runs Pi)                                    | `auto` outside Herdr  | `auto` in a Herdr pane                                                                                       |
+| ---------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Linux with `ss`                                | as in the table above | reads the server's clients (below): one computer is it, several are **asked about**, unrecognized **refuse** |
+| Linux without `ss`, or a pane without a socket | as above              | this computer if no remote Herdr client is running, else **refuses**                                         |
+| macOS                                          | as above              | this computer if no remote Herdr client is running, else **refuses**                                         |
+| Windows                                        | as above              | the same, from a PowerShell process list (not yet run on a real Windows)                                     |
 
 Outside Herdr nothing depends on the operating system: Pi's own `SSH_CONNECTION` names the computer
 (Tailscale looks it up), and no SSH variable means this computer.
@@ -79,11 +79,25 @@ Outside Herdr nothing depends on the operating system: Pi's own `SSH_CONNECTION`
 3. One origin: it is that computer (`identify`: `tailscale whois`, same Tailscale user, Linux, a
    machine name safe for `ssh`; its media host must announce the same node ID in its `hello`).
 4. Several origins (this computer's own client plus a remote one, or two remote computers):
-   **refuses**, naming the computers and `live.audioHost`. Several connections from one computer
-   (two bridges from the same laptop, or a bridge from this very computer next to its local client)
-   are one origin. A computer that cannot be identified counts as another origin, named by address.
+   `/live` **asks** "Which computer are you at?" with `ctx.ui.select`: each identified remote by its
+   Tailscale name, then "this computer (<hostname>)" if a local client is attached. Several
+   connections from one computer (two bridges from the same laptop, or a bridge from this very
+   computer next to its local client) are one origin. A computer that cannot be the audio computer
+   (not identified, another Tailscale user's, macOS or Windows) is **not offered**: a
+   `Not offered: <address>: <reason>` notice says why. It is still counted, so one usable computer
+   among unusable ones is asked about too (the unusable one may be the typist). With nothing usable
+   it refuses with the reasons. The chosen remote goes through the same identity checks as a
+   single one (`identify`, then the media host's `hello` node) before any device opens. Escape, or
+   an answer that was not offered, ends as `OriginCancelled`: a short notice and nothing started.
+   Where nobody can be asked (`resolveMediaTarget` called without `choose`) it **refuses**, naming
+   the computers and `live.audioHost`.
 
-### Why several attached computers are a refusal
+   The question is asked in the `/live` command and the toggle shortcut (`start` in
+   `src/live/index.ts`), before the voice UI opens, every time and never remembered. The answer is
+   passed to the session as its target, so a start that waits for the floor (and one resumed after
+   losing it) uses it and does not ask again at a later moment.
+
+### Why several attached computers are asked about
 
 Herdr tells nothing about who typed, and none of its API is used (stock Herdr has no client list
 or origin method). No other signal found separates the typist reliably, so `auto` does not guess:
@@ -98,9 +112,11 @@ or origin method). No other signal found separates the typist reliably, so `auto
   `/proc/<pid>/io` mixes keystrokes with the rendering the client reads back. "Nobody remote just
   typed" is not evidence that the local one did.
 
-So with several computers attached, detach the ones you are not using (a screen left attached
-counts), or set `live.audioHost` to a host. A reliable signal, such as Herdr reporting which
-client sent a pane its last input, would make this refusal unnecessary.
+So with several computers attached, Pi asks the person who knows. Detaching the ones you are not
+using (a screen left attached counts) avoids the question, and so does setting `live.audioHost` to
+a host. A reliable signal, such as Herdr reporting which client sent a pane its last input, would
+make the question unnecessary. Where it cannot read the clients at all (macOS, Windows, no `ss`)
+it cannot list who is attached, so it cannot ask either: it refuses if a remote client may exist.
 
 ### Where the clients cannot be read
 
@@ -179,7 +195,7 @@ Run per pair (B, A). Mark a cell only after doing it.
 - [ ] Killing B's Pi, or dropping the network, releases A's microphone within ~20 s.
 - [ ] A second `/live` from another B while one runs is refused as busy; it works after the first stops.
 - [ ] A bad host name or a Mac/Windows `audioHost` fails with a readable reason and opens no device.
-- [ ] With `auto` in Herdr: one computer attached uses it; two attached refuse naming both and `live.audioHost`, and work again once one detaches.
+- [ ] With `auto` in Herdr: one computer attached uses it; two attached ask "Which computer are you at?" (Escape starts nothing, a pick uses that computer), and it stops asking once one detaches.
 - [ ] With `auto` in Herdr on macOS and Windows: only the local screen attached uses this computer's audio; a laptop attached through Herdr refuses and names `live.audioHost`.
 
 | B \ A   | Linux                                 | macOS   | Windows |
