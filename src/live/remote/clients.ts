@@ -50,18 +50,19 @@ function unixSockets(output: string): UnixSocket[] {
  * one-off commands), and the kernel names both ends, so a client is whoever holds the other end of
  * a connection the server accepted there. Another session's server has its own sockets and clients.
  * `unowned` counts connections whose client `ss` shows no process for (another user's, or one that
- * hides itself from `ss`): they are clients all the same, just not placed. Undefined when no
- * process listens on `apiSocket`.
+ * hides itself from `ss`): they are clients all the same, just not placed. Undefined when nothing
+ * listens on `apiSocket`; `serverHidden` when something does but `ss` shows no owner for it, so
+ * its clients cannot be told either.
  */
 export function herdrClientPids(
   output: string,
   apiSocket: string,
-): { pids: number[]; unowned: number } | undefined {
+): { pids: number[]; unowned: number; serverHidden?: true } | undefined {
   const sockets = unixSockets(output);
-  const servers = new Set(
-    sockets.filter((s) => s.state === "LISTEN" && s.path === apiSocket).flatMap((s) => s.pids),
-  );
-  if (servers.size === 0) return undefined;
+  const listeners = sockets.filter((s) => s.state === "LISTEN" && s.path === apiSocket);
+  if (listeners.length === 0) return undefined;
+  const servers = new Set(listeners.flatMap((s) => s.pids));
+  if (servers.size === 0) return { pids: [], unowned: 0, serverHidden: true };
   const ownedByServer = (socket: UnixSocket) => socket.pids.some((pid) => servers.has(pid));
   const clientSockets = new Set(
     sockets
@@ -179,6 +180,31 @@ const SERVER = /^server\b/i;
 const SSH_SESSION = /\bsshd\b/i;
 const UNREADABLE = "(unreadable command line)";
 
+function sshdDescendants(table: ProcessInfo[]): (entry: ProcessInfo) => boolean {
+  const byPid = new Map(table.map((entry) => [entry.pid, entry]));
+  return (entry) => {
+    const seen = new Set([entry.pid]);
+    for (let up = byPid.get(entry.ppid); up && !seen.has(up.pid); up = byPid.get(up.ppid)) {
+      if (SSH_SESSION.test(up.command)) return true;
+      seen.add(up.pid);
+    }
+    return false;
+  };
+}
+
+/**
+ * Whether the entry is positively a person's local Herdr client: the `herdr` program with a command
+ * line Pi can read, not its server, not the bridge command, and not started by sshd. A process that
+ * is merely in the list (`tunnel-v2 --stdio`, a hidden command line) is not one.
+ */
+export function isLocalHerdrClient(entry: ProcessInfo, table: ProcessInfo[]): boolean {
+  if (entry.command.endsWith(UNREADABLE)) return false;
+  const herdr = HERDR_PROGRAM.exec(entry.command);
+  if (!herdr) return false;
+  const args = entry.command.slice(herdr[0].length);
+  return !SERVER.test(args) && !BRIDGE.test(args) && !sshdDescendants(table)(entry);
+}
+
 /**
  * The processes that may be a remote Herdr client: Herdr's own bridge command, and anything sshd
  * started that is `herdr` (not its server) or runs the bridge command under another name. It is all
@@ -189,15 +215,7 @@ const UNREADABLE = "(unreadable command line)";
  * opposite direction, and is not one.
  */
 export function remoteHerdrClients(table: ProcessInfo[]): ProcessInfo[] {
-  const byPid = new Map(table.map((entry) => [entry.pid, entry]));
-  const underSshd = (entry: ProcessInfo) => {
-    const seen = new Set([entry.pid]);
-    for (let up = byPid.get(entry.ppid); up && !seen.has(up.pid); up = byPid.get(up.ppid)) {
-      if (SSH_SESSION.test(up.command)) return true;
-      seen.add(up.pid);
-    }
-    return false;
-  };
+  const underSshd = sshdDescendants(table);
   return table.filter((entry) => {
     if (entry.command === "" || entry.command.endsWith(UNREADABLE)) {
       return entry.command === "" ? underSshd(entry) : HERDR_PROGRAM.test(entry.command);

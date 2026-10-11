@@ -496,12 +496,15 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
         proc(300, 1338, "/opt/herdr/tunnel-v2 --stdio"),
         proc(300, 3214, "/opt/herdr/tunnel-v2 --stdio"),
         proc(300, 3214, "herdr server"),
-        proc(300, 3214, "herdr (unreadable command line)"),
-        proc(300, 3214, ""),
         proc(300, 3214, "nc -U /run/user/1000/herdr-client.sock"),
       ]) {
         const { result } = denied([...LOCAL_ONLY, SSHD, stranger]);
         await expect(result).rejects.toThrow(/process 300.*not a local herdr/s);
+        await expect(result).rejects.toThrow(/live\.audioHost/);
+      }
+      // A hidden command line is not a local herdr either; it is taken for a possible bridge.
+      for (const hidden of ["herdr (unreadable command line)", ""]) {
+        const { result } = denied([...LOCAL_ONLY, SSHD, proc(300, 1338, hidden)]);
         await expect(result).rejects.toThrow(/live\.audioHost/);
       }
     });

@@ -5,6 +5,7 @@ import {
   type ProcessInfo,
   hasTerminal,
   herdrClientPids,
+  isLocalHerdrClient,
   remoteHerdrClients,
   runProcessTable,
   runSs,
@@ -149,7 +150,7 @@ async function resolveFromProcesses(
   deps: OriginDependencies,
   platform: NodeJS.Platform,
   reason: string,
-  /** Clients Pi could not read: each must be in the list, or it may be someone else's. */
+  /** Clients Pi could not read: each must be a local herdr in the list, or it may be someone else's. */
   unread: number[] = [],
 ): Promise<MediaTarget> {
   let table: ProcessInfo[];
@@ -165,11 +166,18 @@ async function resolveFromProcesses(
       `A remote Herdr client is attached to this computer, and ${reason}, so Pi cannot tell whether you are typing from it. ${SET_AUDIO_HOST}`,
     );
   }
-  const unseen = unread.find((pid) => !table.some((entry) => entry.pid === pid));
-  if (unseen !== undefined) {
-    throw new OriginError(
-      `A Herdr client (process ${unseen}) could not be read and is not in the process list, so Pi cannot tell whether it is remote. ${SET_AUDIO_HOST}`,
-    );
+  for (const pid of unread) {
+    const entry = table.find((candidate) => candidate.pid === pid);
+    if (entry === undefined) {
+      throw new OriginError(
+        `A Herdr client (process ${pid}) could not be read and is not in the process list, so Pi cannot tell whether it is remote. ${SET_AUDIO_HOST}`,
+      );
+    }
+    if (!isLocalHerdrClient(entry, table)) {
+      throw new OriginError(
+        `A Herdr client (process ${pid}) could not be read and is not a local herdr in the process list, so Pi cannot tell whether it is remote. ${SET_AUDIO_HOST}`,
+      );
+    }
   }
   return LOCAL;
 }
@@ -210,6 +218,13 @@ async function resolveInHerdr(
   if (attached === undefined) {
     throw new OriginError(
       `Could not find the Herdr server of this pane (nothing listens on ${apiSocket}). ${SET_AUDIO_HOST}`,
+    );
+  }
+  if (attached.serverHidden) {
+    return resolveFromProcesses(
+      deps,
+      platform,
+      "Pi cannot see which process owns this pane's Herdr server",
     );
   }
   if (attached.unowned > 0) {
