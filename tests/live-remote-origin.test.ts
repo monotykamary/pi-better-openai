@@ -4,6 +4,7 @@ import { OriginError, resolveMediaTarget } from "../src/live/remote/origin.ts";
 import {
   type ProcessInfo,
   hasTerminal,
+  herdrClientPids,
   parseProcessTable,
   remoteHerdrClients,
   runProcessTable,
@@ -24,7 +25,17 @@ const owners = (...pids: number[]) =>
 /** `ss -x -a -n -p` of a machine where one Herdr server runs, with the given clients attached. */
 function unixSockets(
   clients: number[],
-  options: { other?: string[]; api?: number[]; clientName?: string } = {},
+  options: {
+    other?: string[];
+    api?: number[];
+    clientName?: string;
+    /** Accepted connections whose client end `ss` shows without an owner (another user's or non-dumpable). */
+    hidden?: number;
+    /** Accepted connections whose client end `ss` does not show at all. */
+    unlisted?: number;
+    /** Accepted connections whose client already hung up. */
+    closed?: number;
+  } = {},
 ) {
   const lines = [
     `u_str LISTEN 0 4096 ${API} 11 * 0 ${owners(SERVER)}`,
@@ -41,6 +52,14 @@ function unixSockets(
       `u_str ESTAB 0 0 * ${server + 1} * ${server} ${owners(pid, pid).replaceAll('"herdr"', `"${options.clientName ?? "herdr"}"`)}`,
     );
   });
+  const accepted = (peer: string, id: number) =>
+    lines.push(`u_str ESTAB 0 0 ${CLIENTS} ${id} * ${peer} ${owners(SERVER)}`);
+  for (let n = 0; n < (options.hidden ?? 0); n++) {
+    accepted(String(3001 + n * 2), 3000 + n * 2);
+    lines.push(`u_str ESTAB 0 0 * ${3001 + n * 2} * ${3000 + n * 2}`);
+  }
+  for (let n = 0; n < (options.unlisted ?? 0); n++) accepted(String(4001 + n * 2), 4000 + n * 2);
+  for (let n = 0; n < (options.closed ?? 0); n++) accepted("0", 5000 + n * 2);
   // A short-lived `herdr pane ...` talks to the API socket, which is not an attached client.
   for (const pid of options.api ?? []) {
     lines.push(`u_str ESTAB 0 0 ${API} 2000 * 2001 ${owners(SERVER)}`);
@@ -336,6 +355,27 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
       }
     });
 
+    test("a client whose owner ss cannot show refuses: it is connected, but not placed", async () => {
+      for (const hidden of [{ hidden: 1 }, { unlisted: 1 }]) {
+        // Next to a local client, which on its own would have been this computer...
+        const beside = attempt({ unix: unixSockets([300], hidden) });
+        await expect(beside).rejects.toThrow(
+          /can't tell which computer is connected to this Herdr/,
+        );
+        await expect(beside).rejects.toThrow(/live\.audioHost/);
+        // ...and alone, which is not "no client attached" either.
+        await expect(attempt({ unix: unixSockets([], hidden) })).rejects.toThrow(
+          /can't tell which/,
+        );
+      }
+    });
+
+    test("a client that already hung up is not a client", async () => {
+      await expect(attempt({ unix: unixSockets([300], { closed: 2 }) })).resolves.toEqual({
+        kind: "local",
+      });
+    });
+
     test("a bridge is the computer its SSH connection names, whatever it is called", async () => {
       // Its input is a pipe and its name is new; only the connection it came in on matters.
       await expect(
@@ -362,6 +402,67 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
       await expect(
         resolveMediaTarget({ env: IN_HERDR, tailscale: tailnet().run, ...gone }),
       ).resolves.toEqual({ kind: "local" });
+    });
+  });
+
+  describe("a client whose /proc cannot be read is left to the process list", () => {
+    const denied = (processes: ProcessInfo[] | Error, clients = [300]) => {
+      const w = world({ unix: unixSockets(clients), processes });
+      w.sshConnectionOf.mockRejectedValue(
+        Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+      );
+      return {
+        w,
+        result: resolveMediaTarget({ env: IN_HERDR, tailscale: tailnet().run, ...w }),
+      };
+    };
+    const CLIENT = proc(300, 3214, "herdr");
+
+    test("is this computer when the list shows the client and no remote one", async () => {
+      const { result, w } = denied([...LOCAL_ONLY, CLIENT]);
+      await expect(result).resolves.toEqual({ kind: "local" });
+      expect(w.processes).toHaveBeenCalledOnce();
+    });
+
+    test("also when it is the terminal check that is denied", async () => {
+      const w = world({ unix: unixSockets([300]), processes: [...LOCAL_ONLY, CLIENT] });
+      w.isTerminal.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }));
+      await expect(
+        resolveMediaTarget({ env: IN_HERDR, tailscale: tailnet().run, ...w }),
+      ).resolves.toEqual({ kind: "local" });
+    });
+
+    test("refuses when the list shows a remote Herdr client", async () => {
+      const { result } = denied([...LOCAL_ONLY, CLIENT, SSHD, BRIDGE]);
+      await expect(result).rejects.toThrow(/remote Herdr client is attached/);
+      await expect(result).rejects.toThrow(/live\.audioHost/);
+    });
+
+    test("refuses when the list cannot be had", async () => {
+      await expect(denied(new Error("spawn ps ENOENT")).result).rejects.toThrow(
+        /Could not list the processes/,
+      );
+    });
+
+    test("refuses when the list does not show the client itself: it may be another user's", async () => {
+      const { result } = denied([...LOCAL_ONLY]);
+      await expect(result).rejects.toThrow(/process 300.*not in the process list/s);
+      await expect(result).rejects.toThrow(/live\.audioHost/);
+    });
+
+    test("refuses next to a client that is known to be remote, whatever the list shows", async () => {
+      const w = world({
+        unix: unixSockets([200, 300]),
+        connections: { 200: FROM_LAPTOP },
+        processes: [...LOCAL_ONLY, CLIENT],
+      });
+      w.sshConnectionOf.mockImplementation(async (pid) => {
+        if (pid === 300) throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+        return pid === 200 ? FROM_LAPTOP : undefined;
+      });
+      await expect(
+        resolveMediaTarget({ env: IN_HERDR, tailscale: tailnet().run, ...w }),
+      ).rejects.toThrow(/live\.audioHost/);
     });
   });
 
@@ -559,6 +660,24 @@ describe("where Pi cannot read the clients of Herdr's server", () => {
       }
     });
 
+    test("a Herdr process whose command line is hidden refuses: it cannot be told from a bridge", async () => {
+      // Windows hides the command line of an elevated process from an unelevated reader.
+      for (const hidden of [
+        [SSHD, proc(1366, 1338, "herdr.exe (unreadable command line)")],
+        [proc(1366, 4242, "herdr.exe (unreadable command line)")],
+        [SSHD, proc(1366, 1338, "")],
+      ]) {
+        await expect(attempt(place, [...LOCAL_ONLY, ...hidden]).result).rejects.toThrow(
+          /remote Herdr client is attached/,
+        );
+      }
+    });
+
+    test("a hidden command line of something that is not Herdr changes nothing", async () => {
+      const table = [...LOCAL_ONLY, proc(4, 0, "System (unreadable command line)")];
+      await expect(attempt(place, table).result).resolves.toEqual({ kind: "local" });
+    });
+
     test("a client started by hand inside an SSH session refuses", async () => {
       const shell = proc(1499, 1338, "-zsh");
       const client = proc(1500, 1499, "herdr");
@@ -674,6 +793,12 @@ describe("the process list", () => {
     ).toEqual([]);
   });
 
+  test("sshd with a hidden command line is still sshd, by its name", () => {
+    const sshd = proc(1338, 1, "sshd.exe (unreadable command line)");
+    const client = proc(1500, 1338, "herdr");
+    expect(remoteHerdrClients([...LOCAL_ONLY, sshd, client])).toEqual([client]);
+  });
+
   test("a parent loop does not hang the lookup", () => {
     expect(remoteHerdrClients([proc(1, 2, "herdr"), proc(2, 1, "-zsh")])).toEqual([]);
   });
@@ -693,6 +818,8 @@ describe("the process list", () => {
     ]);
     expect(calls[1]?.[0]).toBe("powershell.exe");
     expect(calls[1]?.[1].join(" ")).toMatch(/Get-CimInstance Win32_Process/);
+    // A command line Windows hides is replaced by the program's name, so it is not an empty row.
+    expect(calls[1]?.[1].join(" ")).toMatch(/\.Name.*unreadable command line/);
   });
 
   test("an empty list is a failure, not proof that nothing is running", async () => {
@@ -721,6 +848,29 @@ describe("whether a client is at a terminal", () => {
     await expect(hasTerminal(1, async () => `${target} (deleted)`)).resolves.toBe(false);
   });
 
+  test("a closed stdin is no terminal, but only while the process is there", async () => {
+    const gone = async () => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    };
+    await expect(hasTerminal(7, gone, async (path) => path === "/proc/7")).resolves.toBe(false);
+    await expect(hasTerminal(7, gone, async () => false)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test.skipIf(process.platform !== "linux")(
+    "a real child that closed its stdin has none; one that exited is gone",
+    async () => {
+      const child = spawn("sh", ["-c", "exec 0<&-; exec sleep 30"], { stdio: "ignore" });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await expect(hasTerminal(child.pid ?? 0)).resolves.toBe(false);
+      } finally {
+        child.kill("SIGKILL");
+      }
+      await new Promise((resolve) => child.once("exit", resolve));
+      await expect(hasTerminal(child.pid ?? 0)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+
   test("a process that cannot be read is an error, so it can be told from one with no terminal", async () => {
     await expect(
       hasTerminal(1, async () => {
@@ -740,6 +890,21 @@ describe("whether a client is at a terminal", () => {
       }
     },
   );
+});
+
+describe("the clients of a server, from ss", () => {
+  test("lists the owners, and counts connections whose owner is not shown", () => {
+    expect(herdrClientPids(unixSockets([300, 301]), API)).toEqual({ pids: [300, 301], unowned: 0 });
+    expect(herdrClientPids(unixSockets([300], { hidden: 1, unlisted: 1 }), API)).toEqual({
+      pids: [300],
+      unowned: 2,
+    });
+    expect(herdrClientPids(unixSockets([300], { closed: 1 }), API)).toEqual({
+      pids: [300],
+      unowned: 0,
+    });
+    expect(herdrClientPids("", API)).toBeUndefined();
+  });
 });
 
 describe("the SSH connection of a process", () => {
