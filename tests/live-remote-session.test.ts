@@ -121,11 +121,13 @@ describe("runCompanion (media host)", () => {
     host.send({ type: "mute", muted: true });
     host.send({ type: "activate" });
     await vi.waitFor(() => expect(host.fake.calls.at(-1)).toEqual(["activate"]));
+    await vi.waitFor(() =>
+      expect(host.frames).toContainEqual({ type: "response", id: 3, ok: true }),
+    );
     expect(host.frames).toContainEqual({ type: "response", id: 2, ok: true, sdp: "offer-sdp" });
-    expect(host.frames).toContainEqual({ type: "response", id: 3, ok: true });
     expect(host.frames).not.toContainEqual(expect.objectContaining({ id: 4 }));
     expect(host.fake.calls).toContainEqual(["acceptAnswer", "answer-sdp"]);
-    expect(host.fake.calls).toContainEqual(["waitForOpen", 5_000]);
+    expect(host.fake.media.waitForOpen).toHaveBeenCalledExactlyOnceWith(5_000);
     expect(host.fake.calls).toContainEqual(["setMuted", true]);
 
     finishOpen();
@@ -360,7 +362,7 @@ describe("RemoteLiveMedia (client)", () => {
   });
 
   test("passes events, levels and host failures to the callbacks, isolating throwing ones", async () => {
-    const { proc, callbacks, media } = clientSetup();
+    const { proc, callbacks } = clientSetup();
     callbacks.onEvent.mockImplementationOnce(() => {
       throw new Error("ui bug");
     });
@@ -503,22 +505,24 @@ describe("remote media end to end (client, host and local media over pipes)", ()
     const wire: string[] = [];
     proc.stdin.on("data", (chunk: Buffer) => wire.push(chunk.toString()));
     proc.stdout.on("data", (chunk: Buffer) => wire.push(chunk.toString()));
+    const callbacks = { onEvent: vi.fn(), onLevels: vi.fn(), onFailure: vi.fn() };
+    const media = createRemoteMediaFactory(() => proc, FAST)(callbacks);
     const hostDone = runCompanion({
       input: proc.stdin,
       output: proc.stdout,
       createMedia: createLocalMediaFactory(native.native),
     }).then((code) => proc.exit(code));
-
-    const callbacks = { onEvent: vi.fn(), onLevels: vi.fn(), onFailure: vi.fn() };
-    const media = createRemoteMediaFactory(() => proc, FAST)(callbacks);
     await expect(media.createOffer()).resolves.toBe("native-offer");
     await media.acceptAnswer("SDP-ANSWER");
     await media.waitForOpen();
     media.activate();
 
     const loud = new Float32Array([0.9, -0.5, 0.9, -0.5]);
-    native.mic(loud);
-    await vi.waitFor(() => expect(native.pushAudio).toHaveBeenCalledExactlyOnceWith(loud));
+    // Activation travels asynchronously; audio is only forwarded once the host has applied it.
+    await vi.waitFor(() => {
+      native.mic(loud);
+      expect(native.pushAudio).toHaveBeenCalledWith(loud);
+    });
     native.peerEvent('{"type":"first"}');
     native.peerEvent('{"type":"second"}');
     await vi.waitFor(() => expect(callbacks.onEvent).toHaveBeenCalledTimes(2));
@@ -542,6 +546,8 @@ describe("remote media end to end (client, host and local media over pipes)", ()
 
   test("a host that cannot start the devices fails the session before any audio flows", async () => {
     const proc = new FakeProcess();
+    const callbacks = { onEvent: vi.fn(), onLevels: vi.fn(), onFailure: vi.fn() };
+    const media = createRemoteMediaFactory(() => proc, FAST)(callbacks);
     const hostDone = runCompanion({
       input: proc.stdin,
       output: proc.stdout,
@@ -549,8 +555,6 @@ describe("remote media end to end (client, host and local media over pipes)", ()
         throw new Error("Unable to load the native addon");
       },
     }).then((code) => proc.exit(code));
-    const callbacks = { onEvent: vi.fn(), onLevels: vi.fn(), onFailure: vi.fn() };
-    const media = createRemoteMediaFactory(() => proc, FAST)(callbacks);
     await expect(media.createOffer()).rejects.toThrow("Unable to load the native addon");
     await hostDone;
     await media.close();
