@@ -124,7 +124,8 @@ Example config:
   },
   "live": {
     "enabled": true,
-    "voice": "sol"
+    "voice": "sol",
+    "audioHost": ""
   },
   "pets": {
     "enabled": false,
@@ -244,6 +245,24 @@ Choose the spoken voice under **Live voice** in `/openai-settings`. Supported va
 Live mode requires interactive TUI mode, microphone/speaker access, `openai-codex` OAuth, and one of these native targets: macOS arm64/x64, Linux arm64/x64, or Windows x64. Standard `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` settings are honored for signaling and sideband traffic. Audio/WebRTC uses the MIT-licensed native platform packages from [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi). The adapted implementation is attributed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). On macOS, launchd-managed LocalTerm users should rerun `localterm install` after upgrading LocalTerm and allow its microphone prompt.
 
 The feature uses Codex Desktop's experimental `gpt-live-1-codex`/Quicksilver protocol rather than the public OpenAI Realtime API. Upstream protocol or entitlement changes may temporarily break it.
+
+### Remote audio (experimental)
+
+When Pi runs on one computer and you sit at another, such as a server you reach over SSH, `/live` can use the microphone and speakers of the computer you are at. Pi keeps the Codex login, the realtime session, and the coding agent; the audio computer only captures and plays sound. Only signaling, mute state, and levels cross the SSH connection, and no credential does. It is off until you set `live.audioHost` in the config of the computer running Pi (see above) and run `/reload`:
+
+| `live.audioHost`                                   | `/live` uses                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------- |
+| unset or empty                                     | the computer running Pi, as always; nothing is looked up                        |
+| `auto`                                             | the computer you are connected from (needs Tailscale; details below)            |
+| a host name, an `ssh` config alias, or `user@host` | that computer, over plain `ssh`, so your SSH config (keys, `ProxyJump`) applies |
+
+The audio computer needs:
+
+- A Linux desktop with PipeWire or PulseAudio. A Mac or Windows PC is refused with a message for now.
+- Key-based `ssh` from the Pi computer with no prompts. New host keys are accepted on first use; a changed key is refused.
+- This package installed through Pi's personal settings (`pi install npm:@monotykamary/pi-better-openai`), with Pi started once there. That writes a small launcher at `~/.pi/agent/live-host/media-host`, which the Pi computer starts over SSH. Copies loaded with `-e` or from a project never write it.
+
+`auto` works with plain SSH and with stock [Herdr](https://github.com/herdrdev/herdr); neither needs changes. It also needs Tailscale on both computers under one account, because that is how the connecting computer is named and checked. Outside Herdr it is the computer your own SSH session came from. Inside Herdr on Linux (with `ss` installed) it looks at the Herdr clients attached to the pane's server: one computer attached means that one. With several attached, such as the screen of the Pi computer and your laptop, nothing tells Pi which of you is typing, so `/live` asks "Which computer are you at?" and lists them (the laptop by its Tailscale name, the Pi computer as "this computer"). Arrow keys and Enter pick; Escape starts nothing. It asks every time and remembers nothing, and your pick still goes through the same checks (same Tailscale account, a Linux audio computer) before any microphone opens. An attached computer that cannot be the audio computer (a Mac or Windows PC, someone else's, or one Tailscale cannot identify) is left out of the list with a note, and if none can be one it refuses. Where nobody can be asked it refuses and names them, so you can set the SSH host explicitly. Inside Herdr on macOS and Windows (or a Linux without `ss`) it cannot read the clients, so it uses this computer when no remote Herdr client is attached to it, and refuses when one is. It also refuses where it cannot tell, for example inside tmux over SSH or when a Herdr client is not one it recognizes, rather than use a microphone nobody chose. Outside Herdr it works the same on every operating system. Developer notes are in [`src/live/remote/README.md`](src/live/remote/README.md).
 
 ## Image generation
 

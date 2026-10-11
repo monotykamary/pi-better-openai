@@ -51,14 +51,15 @@
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "lint": "oxlint --deny-warnings index.ts src/*.ts src/*/*.ts tests/*.ts",
-    "lint:fix": "oxlint --fix index.ts src/*.ts src/*/*.ts tests/*.ts",
+    "lint": "oxlint --deny-warnings index.ts src/*.ts src/*/*.ts src/*/*/*.ts src/*/*/*.mjs tests/*.ts",
+    "lint:fix": "oxlint --fix index.ts src/*.ts src/*/*.ts src/*/*/*.ts src/*/*/*.mjs tests/*.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:pi": "node scripts/test-pi-compat.mjs"
   },
   "dependencies": {
     "https-proxy-agent": "9.1.0",
+    "jiti": "2.7.0",
     "proxy-from-env": "2.1.0",
     "sharp": "0.35.5",
     "undici": "8.10.2",

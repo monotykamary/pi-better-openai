@@ -48,7 +48,7 @@ describe("config helpers", () => {
     expect(_test.DEFAULT_CONFIG.usage?.autoRedeemBankedResets).toBe(true);
     expect(_test.DEFAULT_IMAGE_CONFIG.defaultModel).toBe("gpt-image-2.5");
     expect(_test.DEFAULT_IMAGE_CONFIG.defaultSave).toBe("project");
-    expect(_test.DEFAULT_LIVE_CONFIG).toEqual({ enabled: true, voice: "sol" });
+    expect(_test.DEFAULT_LIVE_CONFIG).toEqual({ enabled: true, voice: "sol", audioHost: "" });
     expect(_test.DEFAULT_PET_CONFIG.placement).toBe("inline-right");
     expect(_test.DEFAULT_PET_CONFIG.state).toBe("idle");
     expect(_test.DEFAULT_PET_CONFIG.thinkingState).toBe("review");
@@ -310,7 +310,7 @@ describe("config helpers", () => {
           },
           footer: { mode: "replace" },
           image: { defaultSave: "global", outputFormat: "jpeg", timeoutMs: 40000 },
-          live: { enabled: false, voice: "spruce" },
+          live: { enabled: false, voice: "spruce", audioHost: "me@audio-pc" },
           pets: {
             placement: "badge",
             idleEmotes: false,
@@ -340,7 +340,7 @@ describe("config helpers", () => {
           outputFormat: "webp",
           timeoutMs: 40000,
         });
-        expect(resolved.live).toEqual({ enabled: true, voice: "spruce" });
+        expect(resolved.live).toEqual({ enabled: true, voice: "spruce", audioHost: "me@audio-pc" });
         expect(resolved.pets).toMatchObject({
           placement: "badge",
           idleEmotes: false,
@@ -357,7 +357,7 @@ describe("config helpers", () => {
       writeConfig(configPath, {
         footer: { mode: "float" },
         image: { enabled: true, defaultSave: "desktop", outputFormat: "gif" },
-        live: { enabled: false, voice: "robot" },
+        live: { enabled: false, voice: "robot", audioHost: 7 },
         pets: { enabled: true, placement: "ceiling", state: "sleeping", thinkingState: "ponder" },
       });
 
@@ -405,6 +405,7 @@ describe("config helpers", () => {
     expect(descriptors.get("image.defaultModel")?.values).toEqual(["gpt-image-2.5", "gpt-image-2"]);
     expect(descriptors.get("live.enabled")?.parse("true")).toBe(true);
     expect(descriptors.get("live.voice")?.parse("vale")).toBe("vale");
+    expect(descriptors.get("live.audioHost")?.parse(" me@audio-pc ")).toBe("me@audio-pc");
   });
 
   test("applies settings writes with persisted raw config shapes", () => {

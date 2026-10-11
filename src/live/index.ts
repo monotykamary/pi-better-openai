@@ -1,5 +1,6 @@
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { fileURLToPath } from "node:url";
 import { getCodexCredentials } from "../codex-auth.ts";
 import type { ResolvedConfig } from "../config.ts";
 import { sanitizeDiagnosticError } from "../format.ts";
@@ -9,6 +10,9 @@ import {
   type LiveTranscript,
 } from "./controller.ts";
 import { attachFocusReporting, probeFocusReporting, type FocusTerminalHandle } from "./focus.ts";
+import { type LauncherOptions, registerPersonalLauncher } from "./remote/host.ts";
+import { type MediaTarget, OriginCancelled } from "./remote/origin.ts";
+import { type RouteDependencies, resolveLiveMedia, resolveLiveTarget } from "./remote/route.ts";
 import {
   LIVE_QUEUE_TICK_MS,
   LiveFloorArbiter,
@@ -58,6 +62,8 @@ export interface LiveRegistrationDependencies {
   attachFocusReporting?: typeof attachFocusReporting;
   notifyActivatedUnfocused?: (handle: FocusTerminalHandle, label: string) => void;
   tickMs?: number;
+  registerLauncher?: (options: Pick<LauncherOptions, "entry">) => unknown;
+  resolveTarget?: RouteDependencies["resolveTarget"];
 }
 
 // eslint-disable-next-line no-control-regex -- OSC payloads must not carry raw control characters; matching them is the point
@@ -110,8 +116,18 @@ export function registerOpenAILive(
   const attachFocus = dependencies.attachFocusReporting ?? attachFocusReporting;
   const notifyUnfocused = dependencies.notifyActivatedUnfocused ?? notifyActivatedUnfocused;
   const tickMs = dependencies.tickMs ?? LIVE_QUEUE_TICK_MS;
+  try {
+    // Lets Pi on another computer start this copy's media host over SSH; only the personal
+    // install of the package ever writes it.
+    (dependencies.registerLauncher ?? registerPersonalLauncher)({
+      entry: fileURLToPath(new URL("./remote/media-host.mjs", import.meta.url)),
+    });
+  } catch {
+    // Best effort: a read-only home must not stop /live from registering.
+  }
   let activeRun: ActiveLiveRun | undefined;
   let settling: Promise<void> | undefined;
+  let choosing = false;
 
   async function stopActive(): Promise<void> {
     const run = activeRun;
@@ -134,6 +150,33 @@ export function registerOpenAILive(
       return;
     }
     if (settling) await settling;
+
+    // `auto` may have to ask which computer the user is at. That is settled here, when /live is
+    // asked, so a start that later waits for the floor neither asks at an odd moment nor skips
+    // the answer: it reuses this target.
+    let target: MediaTarget | undefined;
+    if (cfg.live.audioHost?.trim() === "auto") {
+      if (choosing) return;
+      choosing = true;
+      try {
+        target = await resolveLiveTarget({
+          audioHost: cfg.live.audioHost,
+          resolveTarget: dependencies.resolveTarget,
+          choose: async (labels, notes) => {
+            for (const note of notes) ctx.ui.notify(`Not offered: ${note}`, "info");
+            return ctx.ui.select("Which computer are you at?", labels);
+          },
+        });
+      } catch (cause) {
+        ctx.ui.notify(
+          sanitizeDiagnosticError(errorFrom(cause).message),
+          cause instanceof OriginCancelled ? "info" : "error",
+        );
+        return;
+      } finally {
+        choosing = false;
+      }
+    }
 
     const result = await ctx.ui.custom<LiveUiResult>((tui, theme, _keybindings, done) => {
       let completed = false;
@@ -180,6 +223,11 @@ export function registerOpenAILive(
           sessionId: ctx.sessionManager.getSessionId(),
           voice: cfg.live.voice,
           getCredentials: (signal) => getCodexCredentials(ctx, signal),
+          resolveMedia: () =>
+            resolveLiveMedia({
+              audioHost: cfg.live.audioHost,
+              resolveTarget: target && (async () => target),
+            }),
           delegate: (request) => {
             pi.sendMessage(
               {

@@ -4,7 +4,13 @@ import { fetch as undiciFetch, ProxyAgent } from "undici";
 import WebSocket, { type RawData } from "ws";
 import { CODEX_AUTH_REQUIRED, type CodexCredentials } from "../codex-auth.ts";
 import { generateCodexAttestation } from "./attestation.ts";
-import { loadLiveNative, type LiveNativeBindings, type LiveWebRtcPeerInstance } from "./native.ts";
+import {
+  clampLevel,
+  createLocalMediaFactory,
+  type LiveMedia,
+  type LiveMediaFactory,
+} from "./media.ts";
+import { loadLiveNative, type LiveNativeBindings } from "./native.ts";
 import {
   buildLiveSessionPayload,
   type LiveClientMessage,
@@ -32,7 +38,7 @@ type LiveSignalingResult = {
 
 export interface LiveTransportCallbacks {
   onEvent(event: LiveServerEvent): void;
-  onOutputLevel(level: number): void;
+  onLevels(input: number, output: number): void;
 }
 
 export interface LiveTransportOptions {
@@ -42,7 +48,10 @@ export interface LiveTransportOptions {
   voice: string;
   callbacks: LiveTransportCallbacks;
   signal?: AbortSignal;
+  /** Host-side native bindings, used for attestation and the default local media. */
   native?: LiveNativeBindings;
+  /** Where the microphone, filter and WebRTC peer live; defaults to this computer. */
+  createMedia?: LiveMediaFactory;
 }
 
 function errorFrom(cause: unknown): Error {
@@ -115,11 +124,12 @@ export function buildLiveHeaders(
 export class CodexLiveTransport {
   readonly #options: LiveTransportOptions;
   readonly #native: LiveNativeBindings;
+  readonly #createMedia: LiveMediaFactory;
   readonly #realtimeSessionId = crypto.randomUUID();
   readonly #closeController = new AbortController();
   readonly #operationSignal: AbortSignal;
   readonly #abortListener: () => void;
-  #peer: LiveWebRtcPeerInstance | undefined;
+  #media: LiveMedia | undefined;
   #sideband: WebSocket | undefined;
   #state: Lifecycle = "idle";
   #connectPromise: Promise<void> | undefined;
@@ -131,11 +141,12 @@ export class CodexLiveTransport {
   constructor(options: LiveTransportOptions) {
     this.#options = options;
     this.#native = options.native ?? loadLiveNative();
+    this.#createMedia = options.createMedia ?? createLocalMediaFactory(this.#native);
     this.#operationSignal = options.signal
       ? AbortSignal.any([options.signal, this.#closeController.signal])
       : this.#closeController.signal;
     this.#abortListener = () => {
-      void this.close();
+      void this.close().catch(() => undefined);
     };
     if (!options.signal?.aborted) {
       options.signal?.addEventListener("abort", this.#abortListener, { once: true });
@@ -151,7 +162,7 @@ export class CodexLiveTransport {
     if (this.#operationSignal.aborted) return Promise.reject(abortReason(this.#operationSignal));
     this.#state = "connecting";
     const operation = this.#connect().catch(async (cause) => {
-      await this.close();
+      await this.close().catch(() => undefined);
       throw cause;
     });
     this.#connectPromise = operation;
@@ -159,28 +170,26 @@ export class CodexLiveTransport {
   }
 
   async #connect(): Promise<void> {
-    const peer = new this.#native.LiveWebRtcPeer(
-      (error, payload) => {
-        if (error) this.#handlePeerFailure(error.message);
-        else this.#handleServerEvent(payload);
+    const media = this.#createMedia(
+      {
+        onEvent: (payload) => this.#handleServerEvent(payload),
+        onLevels: (input, output) => this.#handleLevels(input, output),
+        onFailure: (message) => this.#handlePeerFailure(message),
       },
-      (error, level) => {
-        if (error) this.#handlePeerFailure(error.message);
-        else this.#handleOutputLevel(level);
-      },
-      (error, message) => this.#handlePeerFailure(error?.message ?? message),
+      this.#operationSignal,
     );
-    this.#peer = peer;
-    const offer = await peer.createOffer();
+    this.#media = media;
+    media.setMuted(this.#muted);
+    const offer = await media.createOffer();
     if (this.#state !== "connecting") throw abortReason(this.#operationSignal);
     const signaling = await this.#signal(offer);
-    await peer.acceptAnswer(signaling.answer);
-    peer.setMuted(this.#muted);
-    await peer.waitForOpen();
+    await media.acceptAnswer(signaling.answer);
+    await media.waitForOpen();
     if (this.#state !== "connecting") throw abortReason(this.#operationSignal);
     await this.#connectSideband(signaling.callId, signaling.credentials, signaling.attestation);
     if (this.#state !== "connecting") throw abortReason(this.#operationSignal);
     this.#state = "connected";
+    media.activate();
   }
 
   async #signal(offer: string): Promise<LiveSignalingResult> {
@@ -361,10 +370,10 @@ export class CodexLiveTransport {
     }
   }
 
-  #handleOutputLevel(level: number): void {
-    if (this.#state !== "connected" || !Number.isFinite(level)) return;
+  #handleLevels(input: number, output: number): void {
+    if (this.#state === "closing" || this.#state === "closed") return;
     try {
-      this.#options.callbacks.onOutputLevel(Math.min(1, Math.max(0, level)));
+      this.#options.callbacks.onLevels(clampLevel(input), clampLevel(output));
     } catch {
       // UI callbacks are isolated from the transport lifecycle.
     }
@@ -402,14 +411,9 @@ export class CodexLiveTransport {
     return operation;
   }
 
-  pushAudio(samples: Float32Array): void {
-    if (this.#state !== "connected" || this.#muted || samples.length === 0) return;
-    this.#peer?.pushAudio(samples);
-  }
-
   setMuted(muted: boolean): void {
     this.#muted = muted;
-    if (this.#state === "connected") this.#peer?.setMuted(muted);
+    this.#media?.setMuted(muted);
   }
 
   close(): Promise<void> {
@@ -424,22 +428,24 @@ export class CodexLiveTransport {
   async #close(): Promise<void> {
     this.#options.signal?.removeEventListener("abort", this.#abortListener);
     const sideband = this.#sideband;
-    const peer = this.#peer;
+    const media = this.#media;
     this.#sideband = undefined;
-    this.#peer = undefined;
+    this.#media = undefined;
     if (
       sideband &&
       (sideband.readyState === WebSocket.OPEN || sideband.readyState === WebSocket.CONNECTING)
     ) {
       sideband.close(1000, "done");
     }
-    if (peer) {
+    let closeError: Error | undefined;
+    if (media) {
       try {
-        await peer.close();
-      } catch {
-        // Closing is best-effort after a terminal transport failure.
+        await media.close();
+      } catch (cause) {
+        closeError = errorFrom(cause);
       }
     }
     this.#state = "closed";
+    if (closeError) throw closeError;
   }
 }

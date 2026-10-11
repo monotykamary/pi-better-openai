@@ -135,6 +135,8 @@ export type WebsearchConfig = {
 export type LiveConfig = {
   enabled?: boolean;
   voice?: LiveVoice;
+  /** Empty: this computer. `auto`: the computer connected from. Otherwise an SSH host to use. */
+  audioHost?: string;
 };
 
 export type PetConfig = {
@@ -237,6 +239,7 @@ export const DEFAULT_WEBSEARCH_CONFIG: Required<WebsearchConfig> = {
 export const DEFAULT_LIVE_CONFIG: Required<LiveConfig> = {
   enabled: true,
   voice: DEFAULT_LIVE_VOICE,
+  audioHost: "",
 };
 
 export const DEFAULT_PET_CONFIG: Required<PetConfig> = {
@@ -552,6 +555,16 @@ export const LIVE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     description: "Voice used for realtime spoken responses.",
     parse: stringSetting,
   },
+  {
+    id: "live.audioHost",
+    section: "live",
+    key: "audioHost",
+    label: "Audio computer (SSH)",
+    currentValue: (cfg) => cfg.live.audioHost || "not set",
+    description:
+      "Whose microphone and speakers /live uses. Empty is this computer; `auto` is the computer you are connected from (needs Tailscale); otherwise an SSH host name, ssh config alias, or user@host. Edit `live.audioHost` in the config file.",
+    parse: (rawValue) => rawValue.trim(),
+  },
 ];
 
 export const PET_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
@@ -863,6 +876,8 @@ export function readConfig(path: string): ConfigFile | undefined {
     config.live = {};
     if (typeof parsed.live.enabled === "boolean") config.live.enabled = parsed.live.enabled;
     if (isLiveVoice(parsed.live.voice)) config.live.voice = parsed.live.voice;
+    if (typeof parsed.live.audioHost === "string")
+      config.live.audioHost = parsed.live.audioHost.trim();
   }
   if (isRecord(parsed.pets)) {
     config.pets = {};

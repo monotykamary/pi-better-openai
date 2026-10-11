@@ -6,6 +6,7 @@
       "name": "@monotykamary/pi-better-openai",
       "dependencies": {
         "https-proxy-agent": "9.1.0",
+        "jiti": "2.7.0",
         "proxy-from-env": "2.1.0",
         "sharp": "0.35.5",
         "undici": "8.10.2",
