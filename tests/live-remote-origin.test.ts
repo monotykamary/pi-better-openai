@@ -90,6 +90,9 @@ function tailnet() {
     "100.96.150.43": { StableID: "nWIN", Name: "win.example.ts.net." },
     "100.96.150.44": { StableID: "nSTRANGER", Name: "box.example.ts.net.", User: 8 },
     "100.96.150.45": { StableID: "nB", Name: "this.example.ts.net." },
+    // A userspace Tailscale hands SSH over from loopback; the port names the peer.
+    "127.0.0.1:40000": { StableID: "nLAPTOP", Name: "laptop.example.ts.net." },
+    "[::1]:40000": { StableID: "nLAPTOP", Name: "laptop.example.ts.net." },
   };
   const run = vi.fn(async (args: string[]) => {
     calls.push(args);

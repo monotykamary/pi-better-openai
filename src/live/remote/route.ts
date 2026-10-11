@@ -15,9 +15,11 @@ type SpawnSsh = (
 ) => RemoteMediaProcess;
 
 export interface RouteDependencies {
-  /** The SSH host chosen in the settings; when set, it decides and nothing else is asked. */
+  /** `live.audioHost`: unset is this computer, `auto` the computer connected from, else an SSH host. */
   audioHost?: string;
-  resolveTarget?: () => Promise<MediaTarget>;
+  /** When /live was asked; `auto` measures who typed against it. */
+  askedAt?: number;
+  resolveTarget?: (askedAt: number) => Promise<MediaTarget>;
   spawn?: SpawnSsh;
 }
 
@@ -52,16 +54,20 @@ export function sshArguments(host: string): string[] {
 
 /**
  * Where the media of a new live session lives. Undefined means this computer, the default path;
- * a remote computer returns a factory that starts its media host over SSH. A host chosen in the
- * settings wins over what Herdr says, and is trusted to be the computer meant: only the host's
- * hello is checked. Refusals throw, so a session never falls back to a microphone nobody chose.
+ * a remote computer returns a factory that starts its media host over SSH. Only `auto` looks
+ * anything up; a host named in the settings is trusted to be the computer meant, so only its hello
+ * is checked. Refusals throw, so a session never falls back to a microphone nobody chose.
  */
 export async function resolveLiveMedia(
   deps: RouteDependencies = {},
 ): Promise<LiveMediaFactory | undefined> {
-  const target = deps.audioHost
-    ? { kind: "remote" as const, host: deps.audioHost, node: undefined }
-    : await (deps.resolveTarget ?? resolveMediaTarget)();
+  const setting = deps.audioHost?.trim();
+  if (!setting) return undefined;
+  const askedAt = deps.askedAt ?? Date.now();
+  const target =
+    setting === "auto"
+      ? await (deps.resolveTarget ?? ((at) => resolveMediaTarget({ askedAt: at })))(askedAt)
+      : { kind: "remote" as const, host: setting, node: undefined };
   if (target.kind === "local") return undefined;
   const args = sshArguments(target.host);
   const spawn: SpawnSsh =

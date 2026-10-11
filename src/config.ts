@@ -135,7 +135,7 @@ export type WebsearchConfig = {
 export type LiveConfig = {
   enabled?: boolean;
   voice?: LiveVoice;
-  /** An SSH host whose microphone and speakers /live uses instead of this computer's. */
+  /** Empty: this computer. `auto`: the computer connected from. Otherwise an SSH host to use. */
   audioHost?: string;
 };
 
@@ -562,7 +562,7 @@ export const LIVE_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     label: "Audio computer (SSH)",
     currentValue: (cfg) => cfg.live.audioHost || "not set",
     description:
-      "SSH host whose microphone and speakers /live uses instead of this computer's: a host name, ssh config alias, or user@host. Set `live.audioHost` in the config file; empty keeps this computer.",
+      "Whose microphone and speakers /live uses. Empty is this computer; `auto` is the computer you are connected from (needs Tailscale); otherwise an SSH host name, ssh config alias, or user@host. Edit `live.audioHost` in the config file.",
     parse: (rawValue) => rawValue.trim(),
   },
 ];

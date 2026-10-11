@@ -1,15 +1,20 @@
-// Adapted from herdr-codex-voice's client_origin.py (MIT, see THIRD_PARTY_NOTICES.md).
-import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+// The Tailscale lookup of an SSH connection is adapted from herdr-codex-voice's client_origin.py
+// (MIT, see THIRD_PARTY_NOTICES.md).
 import { isIP } from "node:net";
-import { connect } from "node:net";
-import { promisify } from "node:util";
+import { herdrClientPids, lastReceivedMs, runSs, type Ss, sshConnectionOf } from "./clients.ts";
 import { type TailscaleJson, tailscaleJson } from "./tailscale.ts";
 
-const HERDR_TIMEOUT_MS = 3_000;
-const MAX_HERDR_RESPONSE_BYTES = 1_048_576;
 // A MagicDNS machine name. Anything else could be read by ssh as an option.
 const HOST_LABEL = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
+const SSH_MARKERS = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] as const;
+const MULTIPLEXERS = ["TMUX", "STY", "ZELLIJ"] as const;
+/**
+ * How long before /live was asked a client's data may have arrived and still be the keystroke that
+ * asked: the network to the pane is a few milliseconds, this allows for a busy machine. A client
+ * whose last data is older is idle; one that sends a keepalive at that moment looks the same.
+ */
+const KEYSTROKE_WINDOW_MS = 120;
+const SET_AUDIO_HOST = "Set live.audioHost to the SSH host of the computer to use.";
 
 /** Why /live will not pick an audio computer; shown to the user as is. */
 export class OriginError extends Error {
@@ -31,15 +36,15 @@ export type MediaTarget =
 
 const LOCAL: MediaTarget = { kind: "local" };
 
-export interface HerdrClient {
-  capabilities(): Promise<Record<string, unknown>>;
-  lastInput(pane: string): Promise<unknown>;
-}
-
 export interface OriginDependencies {
   env?: NodeJS.ProcessEnv;
-  herdr?: HerdrClient;
+  platform?: NodeJS.Platform;
   tailscale?: TailscaleJson | undefined;
+  ss?: Ss;
+  sshConnectionOf?: (pid: number) => Promise<string | undefined>;
+  /** When /live was asked: the keystroke that did it had just reached this computer. */
+  askedAt?: number;
+  now?: () => number;
 }
 
 type Json = Record<string, unknown>;
@@ -52,96 +57,8 @@ function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-function rpc(path: string, method: string, params: object): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const id = `better-openai-${randomUUID()}`;
-    const socket = connect(path);
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const fail = (error: Error) => {
-      socket.destroy();
-      reject(error);
-    };
-    socket.setTimeout(HERDR_TIMEOUT_MS, () => fail(new Error("Herdr did not answer in time.")));
-    socket.once("connect", () => socket.write(`${JSON.stringify({ id, method, params })}\n`));
-    socket.on("error", fail);
-    socket.on("end", () => fail(new Error("Herdr closed the connection before answering.")));
-    socket.on("data", (chunk: Buffer) => {
-      chunks.push(chunk);
-      size += chunk.length;
-      if (size > MAX_HERDR_RESPONSE_BYTES) return fail(new Error("Herdr's answer was too large."));
-      if (!chunk.includes(0x0a)) return;
-      socket.destroy();
-      try {
-        const reply: unknown = JSON.parse(Buffer.concat(chunks).toString().split("\n")[0] ?? "");
-        if (!isRecord(reply) || reply.id !== id || "error" in reply) {
-          throw new Error("Herdr could not answer.");
-        }
-        resolve(reply.result);
-      } catch (cause) {
-        reject(cause);
-      }
-    });
-  });
-}
-
-async function herdrCli(env: NodeJS.ProcessEnv, args: string[]): Promise<Json> {
-  const { stdout } = await promisify(execFile)(env.HERDR_BIN_PATH || "herdr", args, {
-    timeout: HERDR_TIMEOUT_MS,
-    maxBuffer: MAX_HERDR_RESPONSE_BYTES,
-    windowsHide: true,
-  });
-  const value: unknown = JSON.parse(stdout);
-  if (!isRecord(value)) throw new Error("Herdr returned an unexpected answer.");
-  return value;
-}
-
-/**
- * Herdr's own view of who typed in a pane. Unix goes over the raw socket, because the CLI's
- * status does not list the capability even where it exists. Windows has no such socket, so it
- * uses the CLI, which speaks Herdr's named pipe.
- */
-export function createHerdrClient(
-  options: {
-    env?: NodeJS.ProcessEnv;
-    platform?: NodeJS.Platform;
-    runCli?: (args: string[]) => Promise<Json>;
-  } = {},
-): HerdrClient {
-  const env = options.env ?? process.env;
-  const windows = (options.platform ?? process.platform) === "win32";
-  const runCli = options.runCli ?? ((args: string[]) => herdrCli(env, args));
-  return {
-    async capabilities() {
-      let answer: unknown;
-      if (windows) {
-        const status = await runCli(["status", "server", "--json"]);
-        if (status.running !== true) throw new Error("The current Herdr server is unavailable.");
-        answer = status;
-      } else {
-        answer = await rpc(env.HERDR_SOCKET_PATH ?? "", "ping", {});
-      }
-      // Releases from before capabilities existed answer without the list: it says nothing.
-      const capabilities = isRecord(answer) ? (answer.capabilities ?? {}) : undefined;
-      if (!isRecord(capabilities)) throw new Error("Herdr returned an unexpected answer.");
-      return capabilities;
-    },
-    async lastInput(pane) {
-      if (!windows) {
-        const result = await rpc(env.HERDR_SOCKET_PATH ?? "", "pane.last_input", { pane_id: pane });
-        return isRecord(result) ? result.last_input : undefined;
-      }
-      const { result } = await runCli(["pane", "last-input", pane]);
-      if (!isRecord(result) || result.type !== "pane_last_input" || result.pane_id !== pane) {
-        throw new Error("Herdr returned an unexpected keyboard-origin answer.");
-      }
-      return result.last_input;
-    },
-  };
-}
-
-/** The address Tailscale can look up for an `SSH_CONNECTION` ("src sport dst dport") string. */
-function tailnetEndpoint(connection: string): string {
+/** An `SSH_CONNECTION` ("source sport destination dport") with every field checked. */
+function parseConnection(connection: string) {
   const [source, port, destination, serverPort, ...rest] = connection.trim().split(/\s+/);
   const validPort = (value: string | undefined) =>
     value !== undefined && /^\d{1,5}$/.test(value) && Number(value) >= 1 && Number(value) <= 65_535;
@@ -154,8 +71,17 @@ function tailnetEndpoint(connection: string): string {
     !validPort(port) ||
     !validPort(serverPort)
   ) {
-    throw new OriginError("Herdr gave an SSH connection that cannot be identified.");
+    throw new OriginError("The SSH connection cannot be identified.");
   }
+  return { source, port: port!, destination, serverPort: serverPort! };
+}
+
+const hostPort = (address: string, port: string) =>
+  isIP(address) === 6 ? `[${address}]:${port}` : `${address}:${port}`;
+
+/** The address Tailscale can look up for an `SSH_CONNECTION` ("src sport dst dport") string. */
+function tailnetEndpoint(connection: string): string {
+  const { source, port } = parseConnection(connection);
   // Userspace Tailscale proxies incoming SSH from loopback; only the source port names the peer.
   if (source === "::1") return `[${source}]:${port}`;
   return source.startsWith("127.") ? `${source}:${port}` : source;
@@ -205,52 +131,140 @@ async function identify(connection: string, tailscale: TailscaleJson): Promise<M
   return { kind: "remote", host, node: stableId };
 }
 
+/** Whether the client that came in over `connection` has just sent data, as the kernel counts it. */
+async function justSentData(connection: string, ss: Ss, askedAt: number, now: () => number) {
+  const { source, port, destination, serverPort } = parseConnection(connection);
+  let output: string;
+  try {
+    output = await ss([
+      "-H",
+      "-n",
+      "-t",
+      "-i",
+      "state",
+      "established",
+      "src",
+      hostPort(destination, serverPort),
+      "dst",
+      hostPort(source, port),
+    ]);
+  } catch (cause) {
+    throw new OriginError(
+      `Could not ask the kernel which computer just typed (${messageOf(cause)}). ${SET_AUDIO_HOST}`,
+    );
+  }
+  const age = lastReceivedMs(output);
+  if (age === undefined) return false;
+  const arrived = now() - age;
+  return Math.abs(arrived - askedAt) <= KEYSTROKE_WINDOW_MS;
+}
+
+/** "laptop and desktop", for a refusal; an address stands in for a computer Tailscale cannot name. */
+async function namesOf(connections: string[], tailscale: TailscaleJson): Promise<string> {
+  const names = await Promise.all(
+    connections.map(async (connection) => {
+      const target = await identify(connection, tailscale).catch(() => undefined);
+      return target?.kind === "remote" ? target.host : connection.split(/\s+/)[0];
+    }),
+  );
+  return names.join(" and ");
+}
+
 /**
- * Finds the audio computer from what Herdr knows about who typed in this pane, for a Herdr build
- * that reports it (`pane_last_input`). Outside Herdr, or when Herdr answers that it does not report
- * it, nothing is known and /live stays on this computer, as it always was. Every other doubt,
- * including a Herdr that fails to answer, is a refusal with a reason, never a guess: a remote
- * user's /live must not open this computer's microphone.
+ * Whoever is attached to this pane's Herdr server and where from. Panes carry the server's
+ * environment, not the typist's, so only the clients themselves can say: each is a process of this
+ * user, a remote one with the SSH connection it came in on, a local one with none.
+ */
+async function resolveInHerdr(
+  env: NodeJS.ProcessEnv,
+  deps: OriginDependencies,
+  tailscale: TailscaleJson,
+): Promise<MediaTarget> {
+  if ((deps.platform ?? process.platform) !== "linux") {
+    throw new OriginError(
+      `Telling which computer you are typing from inside Herdr needs Linux on the computer running Pi for now. ${SET_AUDIO_HOST}`,
+    );
+  }
+  const ss = deps.ss ?? runSs;
+  const connectionOf = deps.sshConnectionOf ?? sshConnectionOf;
+  const now = deps.now ?? Date.now;
+  const askedAt = deps.askedAt ?? now();
+  const apiSocket = env.HERDR_SOCKET_PATH ?? "";
+
+  let sockets: string;
+  try {
+    sockets = await ss(["-H", "-n", "-x", "-a", "-p"]);
+  } catch (cause) {
+    throw new OriginError(
+      `Could not run \`ss\` to find the Herdr clients (${messageOf(cause)}). ${SET_AUDIO_HOST}`,
+    );
+  }
+  const pids = herdrClientPids(sockets, apiSocket);
+  if (pids === undefined) {
+    throw new OriginError(
+      `Could not find the Herdr server of this pane (nothing listens on ${apiSocket}). ${SET_AUDIO_HOST}`,
+    );
+  }
+  const found = await Promise.all(
+    pids.map(async (pid) => {
+      try {
+        return { connection: await connectionOf(pid) };
+      } catch (cause) {
+        const code = (cause as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ESRCH") return undefined; // It left in the meantime.
+        throw new OriginError(
+          `Could not read where a Herdr client is connected from (${messageOf(cause)}). ${SET_AUDIO_HOST}`,
+        );
+      }
+    }),
+  );
+  const clients = found.filter((client) => client !== undefined);
+  if (clients.length === 0) {
+    throw new OriginError(
+      `Found no Herdr client attached to this pane's server, so the computer you are typing from cannot be told. ${SET_AUDIO_HOST}`,
+    );
+  }
+  const local = clients.some((client) => client.connection === undefined);
+  const remotes = [...new Set(clients.flatMap((client) => client.connection ?? []))];
+  if (remotes.length === 0) return LOCAL;
+  const only = remotes[0];
+  if (remotes.length === 1 && !local && only !== undefined) return identify(only, tailscale);
+
+  // Several computers are attached; whoever's keystroke just arrived asked for /live.
+  const typed = await Promise.all(
+    remotes.map((connection) => justSentData(connection, ss, askedAt, now)),
+  );
+  const fresh = remotes.filter((_, index) => typed[index]);
+  const [one] = fresh;
+  if (fresh.length === 1 && one !== undefined) return identify(one, tailscale);
+  if (fresh.length === 0 && local) return LOCAL;
+  const names = await namesOf(remotes, tailscale);
+  throw new OriginError(
+    `${names} are attached to this Herdr and Pi could not tell which one you are typing from. ${SET_AUDIO_HOST}`,
+  );
+}
+
+/**
+ * Finds the audio computer for `live.audioHost: "auto"`: the computer the user is connected from.
+ * Inside Herdr that is the Herdr client that just typed; otherwise Pi's own SSH connection. Every
+ * doubt is a refusal with a reason, never a guess that opens this computer's microphone for
+ * someone typing from elsewhere.
  */
 export async function resolveMediaTarget(deps: OriginDependencies = {}): Promise<MediaTarget> {
   const env = deps.env ?? process.env;
-  const pane = env.HERDR_PANE_ID;
-  if (!env.HERDR_SOCKET_PATH || !pane) return LOCAL;
-  const herdr = deps.herdr ?? createHerdrClient({ env });
-  let capabilities: Json;
-  try {
-    capabilities = await herdr.capabilities();
-  } catch (cause) {
+  const tailscale = deps.tailscale ?? tailscaleJson;
+  if (env.HERDR_SOCKET_PATH && env.HERDR_PANE_ID) return resolveInHerdr(env, deps, tailscale);
+  if (!SSH_MARKERS.some((name) => env[name])) return LOCAL;
+  const multiplexer = MULTIPLEXERS.find((name) => env[name]);
+  if (multiplexer) {
     throw new OriginError(
-      `Could not reach Herdr to find the computer you are typing from (${messageOf(cause)}).`,
+      `Pi runs inside ${multiplexer.toLowerCase()} from an SSH session, which hides the computer you are typing from. ${SET_AUDIO_HOST}`,
     );
   }
-  if (capabilities.pane_last_input !== true) return LOCAL;
-  let input: unknown;
-  try {
-    input = await herdr.lastInput(pane);
-  } catch (cause) {
+  if (!env.SSH_CONNECTION) {
     throw new OriginError(
-      `Herdr could not tell which computer typed in this pane (${messageOf(cause)}).`,
+      `Pi is in an SSH session whose connection it cannot see, so the computer you are typing from cannot be told. ${SET_AUDIO_HOST}`,
     );
   }
-  if (!isRecord(input) || input.source !== "client") {
-    throw new OriginError(
-      "Type in this Herdr pane first so Herdr knows which computer's microphone to use.",
-    );
-  }
-  const client = isRecord(input.client) ? input.client : {};
-  if (client.connected !== true) {
-    throw new OriginError(
-      "The computer that last typed in this pane has disconnected. Reconnect, type here, and try again.",
-    );
-  }
-  const connection = typeof client.ssh_connection === "string" ? client.ssh_connection : "";
-  if (client.via === "local" && !connection) return LOCAL;
-  if ((client.via === "local" || client.via === "ssh_bridge") && connection) {
-    return identify(connection, deps.tailscale ?? tailscaleJson);
-  }
-  throw new OriginError(
-    "Herdr does not know which computer is typing into this connection. Reconnect with a Herdr that reports it.",
-  );
+  return identify(env.SSH_CONNECTION, tailscale);
 }

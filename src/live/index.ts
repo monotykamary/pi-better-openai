@@ -62,6 +62,7 @@ export interface LiveRegistrationDependencies {
   notifyActivatedUnfocused?: (handle: FocusTerminalHandle, label: string) => void;
   tickMs?: number;
   registerLauncher?: (options: Pick<LauncherOptions, "entry">) => unknown;
+  resolveLiveMedia?: typeof resolveLiveMedia;
 }
 
 // eslint-disable-next-line no-control-regex -- OSC payloads must not carry raw control characters; matching them is the point
@@ -114,6 +115,7 @@ export function registerOpenAILive(
   const attachFocus = dependencies.attachFocusReporting ?? attachFocusReporting;
   const notifyUnfocused = dependencies.notifyActivatedUnfocused ?? notifyActivatedUnfocused;
   const tickMs = dependencies.tickMs ?? LIVE_QUEUE_TICK_MS;
+  const resolveMedia = dependencies.resolveLiveMedia ?? resolveLiveMedia;
   try {
     // Lets Pi on another computer start this copy's media host over SSH; only the personal
     // install of the package ever writes it.
@@ -146,6 +148,10 @@ export function registerOpenAILive(
       ctx.ui.notify("Live voice is disabled. Enable it in /openai-settings.", "warning");
       return;
     }
+    // The audio computer is whoever just typed this, so it is looked up now, not when the floor is
+    // granted. A refusal waits for the session that asks, which reports it.
+    const media = resolveMedia({ audioHost: cfg.live.audioHost, askedAt: Date.now() });
+    media.catch(() => undefined);
     if (settling) await settling;
 
     const result = await ctx.ui.custom<LiveUiResult>((tui, theme, _keybindings, done) => {
@@ -193,7 +199,7 @@ export function registerOpenAILive(
           sessionId: ctx.sessionManager.getSessionId(),
           voice: cfg.live.voice,
           getCredentials: (signal) => getCodexCredentials(ctx, signal),
-          resolveMedia: () => resolveLiveMedia({ audioHost: cfg.live.audioHost }),
+          resolveMedia: () => media,
           delegate: (request) => {
             pi.sendMessage(
               {
