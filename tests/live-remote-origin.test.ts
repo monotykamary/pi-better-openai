@@ -99,11 +99,19 @@ describe("which computer's microphone /live uses", () => {
     }
   });
 
-  test("a Herdr that cannot be asked is a Herdr that does not report it: this computer", async () => {
-    const unreachable = herdr();
-    unreachable.capabilities.mockRejectedValue(new Error("ECONNREFUSED"));
-    await expect(resolve(IN_HERDR, { herdr: unreachable })).resolves.toEqual({ kind: "local" });
-  });
+  test.each(["ECONNREFUSED", "Herdr did not answer in time."])(
+    "a Herdr that fails to answer (%s) refuses: a failed question is not a missing capability",
+    async (failure) => {
+      const unreachable = herdr();
+      unreachable.capabilities.mockRejectedValue(new Error(failure));
+      const t = tailnet();
+      await expect(resolve(IN_HERDR, { herdr: unreachable, tailscale: t.run })).rejects.toThrow(
+        /Could not reach Herdr/,
+      );
+      expect(unreachable.lastInput).not.toHaveBeenCalled();
+      expect(t.run).not.toHaveBeenCalled();
+    },
+  );
 
   test("a client that typed locally is this computer, whatever the environment says", async () => {
     const h = herdr();
