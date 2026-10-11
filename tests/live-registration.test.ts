@@ -183,7 +183,7 @@ describe("registerOpenAILive", () => {
     expect(() =>
       registerOpenAILive(
         harness.pi,
-        () => makeResolvedConfig({ live: { enabled: true, voice: "vale" } }),
+        () => makeResolvedConfig({ live: { enabled: true, voice: "vale", audioHost: "" } }),
         {
           registerLauncher,
         },
@@ -198,7 +198,7 @@ describe("registerOpenAILive", () => {
   test("rejects non-TUI and disabled invocations before opening custom UI", async () => {
     const harness = createRegistrationHarness();
     registerOpenAILive(harness.pi, () =>
-      makeResolvedConfig({ live: { enabled: false, voice: "sol" } }),
+      makeResolvedConfig({ live: { enabled: false, voice: "sol", audioHost: "" } }),
     );
     const notify = vi.fn();
     const custom = vi.fn();
@@ -228,7 +228,7 @@ describe("registerOpenAILive", () => {
     const notifyUnfocused = vi.fn();
     registerOpenAILive(
       harness.pi,
-      () => makeResolvedConfig({ live: { enabled: true, voice: "vale" } }),
+      () => makeResolvedConfig({ live: { enabled: true, voice: "vale", audioHost: "" } }),
       {
         createSession: (options) => {
           const stub = makeSessionStub(options);
@@ -266,13 +266,44 @@ describe("registerOpenAILive", () => {
     expect(notifyUnfocused).not.toHaveBeenCalled();
   });
 
+  test("hands the chosen audio host to the session, so it is reached over ssh", async () => {
+    const harness = createRegistrationHarness();
+    const sessions: Array<ReturnType<typeof makeSessionStub>> = [];
+    const arbiter = makeFakeArbiter();
+    registerOpenAILive(
+      harness.pi,
+      () => makeResolvedConfig({ live: { enabled: true, voice: "sol", audioHost: "me@audio-pc" } }),
+      {
+        createSession: (options) => {
+          const stub = makeSessionStub(options);
+          sessions.push(stub);
+          return stub;
+        },
+        createArbiter: arbiter.createArbiter,
+        probeFocusReporting: vi.fn(async () => true),
+        attachFocusReporting: vi.fn(() => vi.fn()),
+        notifyActivatedUnfocused: vi.fn(),
+        tickMs: 60_000,
+      },
+    );
+    const captured: CapturedCustom = { component: undefined, tui: makeFakeTui() };
+    const run = commandFrom(harness).handler("", makeContext(makeCustomMock(captured)));
+    await vi.waitFor(() => {
+      requireCallbacks(arbiter);
+    });
+    requireCallbacks(arbiter).onActivated("focus");
+    await run;
+
+    await expect(sessions[0]!.options.resolveMedia!()).resolves.toBeTypeOf("function");
+  });
+
   test("parks the session back to standby on floor loss without closing the enrollment", async () => {
     const harness = createRegistrationHarness();
     const sessions: Array<ReturnType<typeof makeSessionStub>> = [];
     const arbiter = makeFakeArbiter();
     registerOpenAILive(
       harness.pi,
-      () => makeResolvedConfig({ live: { enabled: true, voice: "sol" } }),
+      () => makeResolvedConfig({ live: { enabled: true, voice: "sol", audioHost: "" } }),
       {
         createSession: (options) => {
           const stub = makeSessionStub(options);
@@ -324,7 +355,7 @@ describe("registerOpenAILive", () => {
     const notifyUnfocused = vi.fn();
     registerOpenAILive(
       harness.pi,
-      () => makeResolvedConfig({ live: { enabled: true, voice: "sol" } }),
+      () => makeResolvedConfig({ live: { enabled: true, voice: "sol", audioHost: "" } }),
       {
         createSession: (options) => {
           const stub = makeSessionStub(options);

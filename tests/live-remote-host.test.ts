@@ -219,7 +219,7 @@ describe.skipIf(process.platform !== "linux")("host lock", () => {
 test("only Linux can hold the lock yet, and says so rather than claiming busy", async () => {
   for (const platform of ["darwin", "win32"] as const) {
     const refusal = acquireHostLock("any", platform);
-    await expect(refusal).rejects.toThrow("cannot use this computer's microphone yet");
+    await expect(refusal).rejects.toThrow("Only a Linux computer can provide the audio for remote live voice for now.");
     await expect(refusal).rejects.not.toBeInstanceOf(HostBusyError);
   }
 });

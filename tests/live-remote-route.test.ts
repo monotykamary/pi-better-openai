@@ -49,12 +49,30 @@ describe("ssh to the media host", () => {
     expect(HOST_LAUNCHER_COMMAND).toBe("exec ~/.pi/agent/live-host/media-host");
   });
 
-  test.each(["-oProxyCommand=x", "a b", "", "a;b", "x".repeat(64)])(
-    "refuses the host %j before building a command",
+  test.each(["audio-pc", "audio_pc.local", "pc.example.com", "me@192.168.0.5", "first.last@audio-pc"])(
+    "accepts the SSH host %j: a name, an ssh config alias, an address or user@host",
     (host) => {
-      expect(() => sshArguments(host)).toThrow(OriginError);
+      expect(sshArguments(host).slice(-2)).toEqual([host, HOST_LAUNCHER_COMMAND]);
     },
   );
+
+  test.each([
+    "-oProxyCommand=x",
+    "me@-oProxyCommand=x",
+    "-me@host",
+    "a b",
+    "",
+    "a;b",
+    "$(x)",
+    "a\nb",
+    "@host",
+    "me@",
+    "me@@host",
+    "a:22",
+  ])("refuses the host %j before building a command, naming what is allowed", (host) => {
+    expect(() => sshArguments(host)).toThrow(OriginError);
+    expect(() => sshArguments(host)).toThrow(/host name, an ssh config alias, or user@host/);
+  });
 });
 
 describe("resolveLiveMedia", () => {
@@ -102,5 +120,50 @@ describe("resolveLiveMedia", () => {
     right.stdout.write(encodeFrame({ type: "hello", node: "nLAPTOP" }));
     await vi.waitFor(() => expect(right.written[0]).toMatchObject({ method: "open" }));
     await accepted.close().catch(() => undefined);
+  });
+
+  describe("with an audio host chosen in the settings", () => {
+    test("goes over ssh to that host, with no Herdr or Tailscale question", async () => {
+      const ssh = new FakeSsh();
+      const spawn = vi.fn(() => ssh);
+      const resolveTarget = vi.fn(async () => ({ kind: "local" }) as const);
+      const createMedia = await resolveLiveMedia({ audioHost: "me@audio-pc", resolveTarget, spawn });
+      expect(resolveTarget).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+
+      const media = createMedia!(callbacks());
+      expect(spawn).toHaveBeenCalledWith("ssh", sshArguments("me@audio-pc"), expect.anything());
+      void media.createOffer().catch(() => undefined);
+      // Any computer may answer, with or without a Tailscale node; the hello is still required.
+      ssh.stdout.write(encodeFrame({ type: "hello" }));
+      await vi.waitFor(() => expect(ssh.written[0]).toMatchObject({ method: "open" }));
+      await media.close().catch(() => undefined);
+    });
+
+    test("still refuses a host that speaks before its hello", async () => {
+      const ssh = new FakeSsh();
+      const createMedia = await resolveLiveMedia({ audioHost: "audio-pc", spawn: () => ssh });
+      const media = createMedia!(callbacks());
+      const offer = media.createOffer();
+      ssh.stdout.write(encodeFrame({ type: "levels", input: 0, output: 0 }));
+      await expect(offer).rejects.toThrow(/before its hello/);
+      expect(ssh.written).toEqual([]);
+    });
+
+    test("an unusable host name is an error, and nothing is started or guessed instead", async () => {
+      const spawn = vi.fn();
+      const resolveTarget = vi.fn(async () => ({ kind: "local" }) as const);
+      await expect(
+        resolveLiveMedia({ audioHost: "-oProxyCommand=x", resolveTarget, spawn }),
+      ).rejects.toThrow(/cannot be used as an SSH host name/);
+      expect(resolveTarget).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+    });
+
+    test("an empty setting means no choice: what Herdr says decides", async () => {
+      const resolveTarget = vi.fn(async () => ({ kind: "local" }) as const);
+      await expect(resolveLiveMedia({ audioHost: "", resolveTarget })).resolves.toBeUndefined();
+      expect(resolveTarget).toHaveBeenCalledOnce();
+    });
   });
 });

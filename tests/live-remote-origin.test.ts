@@ -72,24 +72,34 @@ describe("which computer's microphone /live uses", () => {
   });
 
   test.each(["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"])(
-    "outside Herdr, %s means a remote user nobody can identify, so it refuses",
+    "outside Herdr, %s changes nothing: it is this computer, as before",
     async (marker) => {
-      await expect(resolve({ [marker]: "x" })).rejects.toThrow(OriginError);
-      await expect(resolve({ [marker]: "x" })).rejects.toThrow(/SSH session outside Herdr/);
+      const h = herdr();
+      const t = tailnet();
+      await expect(resolve({ [marker]: "x" }, { herdr: h, tailscale: t.run })).resolves.toEqual({
+        kind: "local",
+      });
+      expect(h.capabilities).not.toHaveBeenCalled();
+      expect(t.run).not.toHaveBeenCalled();
     },
   );
 
-  test("a Herdr that cannot say who types refuses, with or without SSH markers", async () => {
+  test("a Herdr that does not report who typed changes nothing: it is this computer", async () => {
     for (const capabilities of [{}, { pane_last_input: false }, { pane_last_input: "yes" }]) {
-      const h = herdr(TYPED_LOCALLY, capabilities);
-      await expect(resolve(IN_HERDR, { herdr: h })).rejects.toThrow(/pane_last_input/);
+      const h = herdr(typedOver(FROM_LAPTOP), capabilities);
+      const t = tailnet();
+      await expect(
+        resolve({ ...IN_HERDR, SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22" }, { herdr: h, tailscale: t.run }),
+      ).resolves.toEqual({ kind: "local" });
       expect(h.lastInput).not.toHaveBeenCalled();
+      expect(t.run).not.toHaveBeenCalled();
     }
+  });
+
+  test("a Herdr that cannot be asked is a Herdr that does not report it: this computer", async () => {
     const unreachable = herdr();
     unreachable.capabilities.mockRejectedValue(new Error("ECONNREFUSED"));
-    await expect(resolve(IN_HERDR, { herdr: unreachable })).rejects.toThrow(
-      /Could not reach Herdr/,
-    );
+    await expect(resolve(IN_HERDR, { herdr: unreachable })).resolves.toEqual({ kind: "local" });
   });
 
   test("a client that typed locally is this computer, whatever the environment says", async () => {
