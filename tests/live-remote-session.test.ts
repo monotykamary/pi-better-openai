@@ -44,7 +44,11 @@ function fakeMedia() {
 }
 
 function startHost(
-  options: { createMedia?: ReturnType<typeof fakeMedia>["createMedia"]; output?: Writable } = {},
+  options: {
+    createMedia?: ReturnType<typeof fakeMedia>["createMedia"];
+    output?: Writable;
+    closeTimeoutMs?: number;
+  } = {},
 ) {
   const input = new PassThrough();
   const output = options.output ?? new PassThrough();
@@ -55,7 +59,14 @@ function startHost(
   const createMedia = options.createMedia ?? fake.createMedia;
   const diagnostics = vi.fn();
   const abort = new AbortController();
-  const done = runCompanion({ input, output, createMedia, diagnostics, signal: abort.signal });
+  const done = runCompanion({
+    input,
+    output,
+    createMedia,
+    diagnostics,
+    signal: abort.signal,
+    closeTimeoutMs: options.closeTimeoutMs,
+  });
   return {
     input,
     output,
@@ -230,6 +241,15 @@ describe("runCompanion (media host)", () => {
     host.send({ type: "close" });
     await expect(host.done).resolves.toBe(1);
     expect(host.diagnostics).toHaveBeenCalledWith(expect.stringContaining("device busy"));
+  });
+
+  test("does not wait forever for a media that cannot close, so the process can still exit", async () => {
+    const host = startHost({ closeTimeoutMs: 30 });
+    await host.open();
+    vi.mocked(host.fake.media.close).mockImplementation(() => new Promise(() => undefined));
+    host.send({ type: "close" });
+    await expect(host.done).resolves.toBe(1);
+    expect(host.diagnostics).toHaveBeenCalledWith(expect.stringContaining("timed out"));
   });
 
   test("sheds levels, then stops, when the other side does not read", async () => {
