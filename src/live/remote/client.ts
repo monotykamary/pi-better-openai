@@ -268,7 +268,11 @@ class RemoteLiveMedia implements LiveMedia {
       }
       if (this.#expectedNode !== undefined && frame.node !== this.#expectedNode) {
         // Neither id is reported: a wrong ssh alias must fail without teaching anything.
-        this.#fail("Live media host is not the computer you are typing from.");
+        this.#fail(
+          frame.node === undefined
+            ? "Live media host cannot tell which computer it is; Tailscale must be installed and running there."
+            : "Live media host is not the computer you are typing from.",
+        );
         return;
       }
       this.#helloSeen = true;
