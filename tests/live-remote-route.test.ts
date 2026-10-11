@@ -2,9 +2,9 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, test, vi } from "vitest";
 import { HOST_LAUNCHER_COMMAND } from "../src/live/remote/host.ts";
-import { OriginError } from "../src/live/remote/origin.ts";
+import { OriginCancelled, OriginError } from "../src/live/remote/origin.ts";
 import { encodeFrame, parseClientFrame, FrameDecoder } from "../src/live/remote/protocol.ts";
-import { resolveLiveMedia, sshArguments } from "../src/live/remote/route.ts";
+import { resolveLiveMedia, resolveLiveTarget, sshArguments } from "../src/live/remote/route.ts";
 
 class FakeSsh extends EventEmitter {
   readonly pid = 4321;
@@ -75,6 +75,40 @@ describe("ssh to the media host", () => {
   ])("refuses the host %j before building a command, naming what is allowed", (host) => {
     expect(() => sshArguments(host)).toThrow(OriginError);
     expect(() => sshArguments(host)).toThrow(/host name, an ssh config alias, or user@host/);
+  });
+});
+
+describe("resolveLiveTarget", () => {
+  test("only auto looks anything up, and it hands the chooser to the lookup", async () => {
+    const choose = vi.fn(async () => "laptop");
+    const resolveTarget = vi.fn(async (_choose?: unknown) => ({
+      kind: "remote" as const,
+      host: "laptop",
+      node: "nLAPTOP",
+    }));
+    await expect(
+      resolveLiveTarget({ audioHost: " auto ", resolveTarget, choose }),
+    ).resolves.toEqual({ kind: "remote", host: "laptop", node: "nLAPTOP" });
+    expect(resolveTarget).toHaveBeenCalledWith(choose);
+    for (const audioHost of [undefined, "", "  ", "laptop", "me@audio-pc"]) {
+      await expect(
+        resolveLiveTarget({ audioHost, resolveTarget, choose }),
+      ).resolves.toBeUndefined();
+    }
+    expect(resolveTarget).toHaveBeenCalledOnce();
+  });
+
+  test("a cancelled choice and a refusal reach the caller", async () => {
+    for (const reason of [new OriginCancelled(), new OriginError("no")]) {
+      await expect(
+        resolveLiveTarget({
+          audioHost: "auto",
+          resolveTarget: async () => {
+            throw reason;
+          },
+        }),
+      ).rejects.toBe(reason);
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { hostname } from "node:os";
 import { describe, expect, test, vi } from "vitest";
-import { OriginError, resolveMediaTarget } from "../src/live/remote/origin.ts";
+import { OriginCancelled, OriginError, resolveMediaTarget } from "../src/live/remote/origin.ts";
 import {
   type ProcessInfo,
   hasTerminal,
@@ -543,7 +544,136 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
     });
   });
 
-  describe("with several computers attached, nothing says who is typing, so it refuses", () => {
+  describe("with a chooser, several computers attached are asked about", () => {
+    const THIS = `this computer (${hostname().split(".")[0]})`;
+    const ask = (w: World, pick: (labels: string[]) => string | undefined) => {
+      const choose = vi.fn(async (labels: string[], _notes: string[]) => pick(labels));
+      const result = resolveMediaTarget({
+        env: IN_HERDR,
+        tailscale: tailnet().run,
+        ...world(w),
+        choose,
+      });
+      return { choose, result };
+    };
+    const laptopAndThis = { unix: unixSockets([200, 300]), connections: { 200: FROM_LAPTOP } };
+    const LAPTOP = { kind: "remote", host: "laptop", node: "nLAPTOP" };
+
+    test("this computer's own client and a remote one: both are offered, remote first", async () => {
+      const { choose, result } = ask(laptopAndThis, (labels) => labels[0]);
+      await expect(result).resolves.toEqual(LAPTOP);
+      expect(choose).toHaveBeenCalledOnce();
+      expect(choose).toHaveBeenCalledWith(["laptop", THIS], []);
+    });
+
+    test("choosing this computer is this computer", async () => {
+      const { result } = ask(laptopAndThis, (labels) => labels.find((l) => l.startsWith("this")));
+      await expect(result).resolves.toEqual({ kind: "local" });
+    });
+
+    test("two remote computers are offered by their Tailscale names", async () => {
+      const { choose, result } = ask(
+        { unix: unixSockets([200, 201]), connections: { 200: FROM_LAPTOP, 201: FROM_DESKTOP } },
+        () => "desktop",
+      );
+      await expect(result).resolves.toEqual({ kind: "remote", host: "desktop", node: "nDESKTOP" });
+      expect(choose).toHaveBeenCalledWith(["laptop", "desktop"], []);
+    });
+
+    test("Escape starts nothing: the lookup ends as cancelled, not as a computer", async () => {
+      const { result } = ask(laptopAndThis, () => undefined);
+      await expect(result).rejects.toBeInstanceOf(OriginCancelled);
+      await expect(result).rejects.toBeInstanceOf(OriginError);
+      await expect(result).rejects.toThrow(/No computer was chosen/);
+    });
+
+    test("an answer that was not offered is a cancel, never a guess", async () => {
+      const { result } = ask(laptopAndThis, () => "mac");
+      await expect(result).rejects.toBeInstanceOf(OriginCancelled);
+    });
+
+    test.each([
+      ["a Mac", "100.96.150.42", /100\.96\.150\.42: .*macOS/],
+      ["a Windows PC", "100.96.150.43", /100\.96\.150\.43: .*Windows/],
+      [
+        "another Tailscale user's computer",
+        "100.96.150.44",
+        /100\.96\.150\.44: .*another Tailscale user/,
+      ],
+      ["a computer Tailscale does not know", "100.96.150.99", /100\.96\.150\.99: /],
+    ])("%s is not offered, and a note says why", async (_name, address, note) => {
+      const { choose, result } = ask(
+        {
+          unix: unixSockets([200, 201]),
+          connections: { 200: FROM_LAPTOP, 201: from(address) },
+        },
+        (labels) => labels[0],
+      );
+      await expect(result).resolves.toEqual(LAPTOP);
+      const [labels, notes] = choose.mock.calls[0]!;
+      expect(labels).toEqual(["laptop"]);
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatch(note);
+    });
+
+    test("one usable computer among unusable ones is still asked: the unusable one may be the typist", async () => {
+      const { choose, result } = ask(
+        {
+          unix: unixSockets([200, 300]),
+          connections: { 200: from("100.96.150.42") },
+        },
+        () => undefined,
+      );
+      await expect(result).rejects.toBeInstanceOf(OriginCancelled);
+      expect(choose.mock.calls[0]![0]).toEqual([THIS]);
+      expect(choose.mock.calls[0]![1][0]).toMatch(/macOS/);
+    });
+
+    test("with nothing usable it refuses with the reasons and asks nothing", async () => {
+      const { choose, result } = ask(
+        {
+          unix: unixSockets([200, 201]),
+          connections: { 200: from("100.96.150.42"), 201: from("100.96.150.43") },
+        },
+        (labels) => labels[0],
+      );
+      await expect(result).rejects.toThrow(/macOS/);
+      await expect(result).rejects.toThrow(/Windows/);
+      await expect(result).rejects.toThrow(/live\.audioHost/);
+      expect(choose).not.toHaveBeenCalled();
+    });
+
+    test("is never asked when one computer is the answer", async () => {
+      for (const w of [
+        { unix: unixSockets([200]), connections: { 200: FROM_LAPTOP } },
+        { unix: unixSockets([300]) },
+        {
+          unix: unixSockets([200, 201]),
+          connections: { 200: FROM_LAPTOP, 201: from("100.96.150.40") },
+        },
+        { unix: unixSockets([200, 300]), connections: { 200: from("100.96.150.45") } },
+      ]) {
+        const { choose, result } = ask(w, (labels) => labels[0]);
+        await result;
+        expect(choose).not.toHaveBeenCalled();
+      }
+    });
+
+    test("is never asked outside Herdr", async () => {
+      const choose = vi.fn(async () => "laptop");
+      await expect(
+        resolveMediaTarget({
+          env: { SSH_CONNECTION: FROM_LAPTOP },
+          tailscale: tailnet().run,
+          ...world(),
+          choose,
+        }),
+      ).resolves.toEqual(LAPTOP);
+      expect(choose).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("without a chooser, several computers attached cannot be told apart, so it refuses", () => {
     const refusal = (w: World) => resolve(IN_HERDR, { w });
 
     test("this computer's own client and a remote one", async () => {
