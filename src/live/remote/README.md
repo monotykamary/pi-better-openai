@@ -33,12 +33,10 @@ for credentials, attestation or audio, and unknown fields are rejected.
 | unset, empty         | this computer. Nothing is looked up: no `ss`, no Tailscale, no process is read.                                                                                                  |
 | a host               | that SSH host, trusted to be the computer meant: only its `hello` (version) is checked                                                                                           |
 | `auto`, not in Herdr | no SSH variables: this computer; `SSH_CONNECTION`: the computer it came from (Tailscale); `SSH_CLIENT`/`SSH_TTY` alone, or tmux/screen/zellij with any SSH variable: **refuses** |
-| `auto`, in Herdr     | the computer of the Herdr client that typed, found as described below                                                                                                            |
+| `auto`, in Herdr     | the one computer attached to the pane's Herdr server; **refuses** when several are attached (below)                                                                              |
 
 Inside Herdr (both `HERDR_SOCKET_PATH` and `HERDR_PANE_ID` set) Pi's own `SSH_*` variables are
-ignored: a pane carries the environment of the Herdr server, not of whoever is typing. The
-lookup is made when `/live` is asked, not when a queued session gets the floor, because the
-keystroke is the evidence.
+ignored: a pane carries the environment of the Herdr server, not of whoever is typing.
 
 1. `ss -x -a -n -p` lists the unix sockets. The server is the process listening on
    `HERDR_SOCKET_PATH`. It also listens on a second socket (`herdr-client.sock` beside it) that
@@ -50,27 +48,29 @@ keystroke is the evidence.
    process refuses; one that exited meanwhile is skipped.
 3. One origin: it is that computer (`identify`: `tailscale whois`, same Tailscale user, Linux, a
    machine name safe for `ssh`; its media host must announce the same node ID in its `hello`).
-4. Several origins: for each remote one, `ss -t -i` of its SSH connection gives `lastrcv`, the time
-   since the client last sent data. The one whose data arrived within 120 ms of when `/live` was asked
-   is the typist. None and a local client exists: this computer. None and no local client, or several:
-   **refuses**, naming the computers and `live.audioHost`.
+4. Several origins (this computer's own client plus a remote one, or two remote computers):
+   **refuses**, naming the computers and `live.audioHost`. Several connections from one computer
+   (two bridges from the same laptop, or a bridge from this very computer next to its local client)
+   are one origin. A computer that cannot be identified counts as another origin, named by address.
 
-### What the signal is, and what it is not
+### Why several attached computers are a refusal
 
-- Herdr tells nothing about who typed, and none of its API is used (stock Herdr has no client list
-  or origin method). The only per-client input signal found is the TCP `lastrcv` of a remote
-  client's SSH connection. A local client has none: the tty's atime moves in 8-second steps by
-  design, and `/proc/<pid>/io` mixes keystrokes with the rendering the client reads back. So local
-  is inferred by exclusion: nobody remote just typed.
-- Measured on a real attachment (stock bridge, laptop over Tailscale): an idle client sends one
-  36-byte segment every 5.05 s (its keepalive). A keystroke segment is also 36 bytes, so only timing
-  separates them. Asked 400 times at random moments with the laptop idle, 8 (2%) landed within the
-  window and chose the laptop; asked right after a packet, 8 of 8 chose it. That 2% is the cost of
-  an attached but idle remote computer when the user types on the Pi computer itself.
-- The other error, a keystroke older than the window when `/live` runs (a stalled Pi or server),
-  would pick this computer. The window is wide against the few milliseconds the path normally takes.
-- The connection measured is the one the client came in on. A `herdr` started by hand inside an
-  SSH session is read the same way, from its own `SSH_CONNECTION`; that case has not been tried.
+Herdr tells nothing about who typed, and none of its API is used (stock Herdr has no client list
+or origin method). No other signal found separates the typist reliably, so `auto` does not guess:
+
+- The TCP `lastrcv` of a remote client's SSH connection (time since it last sent data) moves on a
+  keystroke, but also on the client's keepalive: an idle client sends a 36-byte segment every
+  5.05 s, the same size as one keystroke. Matched against when `/live` was asked within 120 ms, an
+  idle attached laptop was taken for the typist in 8 of 400 trials (2%), choosing the laptop's
+  microphone for someone at the Pi computer; and a lookup delayed beyond the window chose this
+  computer for someone at the laptop. That was implemented and removed.
+- A local client has no signal at all: the tty's atime moves in 8-second steps by design, and
+  `/proc/<pid>/io` mixes keystrokes with the rendering the client reads back. "Nobody remote just
+  typed" is not evidence that the local one did.
+
+So with several computers attached, detach the ones you are not using (a screen left attached
+counts), or set `live.audioHost` to a host. A reliable signal, such as Herdr reporting which
+client sent a pane its last input, would make this refusal unnecessary.
 
 ## One-time setup
 
@@ -106,7 +106,7 @@ Run per pair (B, A). Mark a cell only after doing it.
 - [ ] Killing B's Pi, or dropping the network, releases A's microphone within ~20 s.
 - [ ] A second `/live` from another B while one runs is refused as busy; it works after the first stops.
 - [ ] A bad host name or a Mac/Windows `audioHost` fails with a readable reason and opens no device.
-- [ ] With `auto` in Herdr and two computers attached: typing on B uses B's microphone, typing on the other uses it; toggling `/live` off and on from the other switches.
+- [ ] With `auto` in Herdr: one computer attached uses it; two attached refuse naming both and `live.audioHost`, and work again once one detaches.
 
 | B \ A   | Linux                                 | macOS   | Windows |
 | ------- | ------------------------------------- | ------- | ------- |
@@ -118,7 +118,7 @@ Run per pair (B, A). Mark a cell only after doing it.
 
 - `route.ts`: the `ssh` command line (host validation) and the media factory a session uses.
 - `origin.ts`: what `auto` does (above) and the Tailscale identity of a computer from its SSH connection.
-- `clients.ts`: the Herdr clients of a server (`ss` output), `SSH_CONNECTION` of a process, `lastrcv`.
+- `clients.ts`: the Herdr clients of a server (`ss` output), and `SSH_CONNECTION` of a process.
 - `client.ts` / `companion.ts` / `protocol.ts`: the Pi-side media, the host loop, and the framing
   (versioned, size-bounded, strictly validated; ping and a 20 s lease so a vanished Pi host
   releases the microphone).
