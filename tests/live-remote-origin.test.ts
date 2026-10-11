@@ -89,7 +89,10 @@ describe("which computer's microphone /live uses", () => {
       const h = herdr(typedOver(FROM_LAPTOP), capabilities);
       const t = tailnet();
       await expect(
-        resolve({ ...IN_HERDR, SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22" }, { herdr: h, tailscale: t.run }),
+        resolve(
+          { ...IN_HERDR, SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22" },
+          { herdr: h, tailscale: t.run },
+        ),
       ).resolves.toEqual({ kind: "local" });
       expect(h.lastInput).not.toHaveBeenCalled();
       expect(t.run).not.toHaveBeenCalled();

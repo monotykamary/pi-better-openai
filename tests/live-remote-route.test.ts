@@ -49,12 +49,15 @@ describe("ssh to the media host", () => {
     expect(HOST_LAUNCHER_COMMAND).toBe("exec ~/.pi/agent/live-host/media-host");
   });
 
-  test.each(["audio-pc", "audio_pc.local", "pc.example.com", "me@192.168.0.5", "first.last@audio-pc"])(
-    "accepts the SSH host %j: a name, an ssh config alias, an address or user@host",
-    (host) => {
-      expect(sshArguments(host).slice(-2)).toEqual([host, HOST_LAUNCHER_COMMAND]);
-    },
-  );
+  test.each([
+    "audio-pc",
+    "audio_pc.local",
+    "pc.example.com",
+    "me@192.168.0.5",
+    "first.last@audio-pc",
+  ])("accepts the SSH host %j: a name, an ssh config alias, an address or user@host", (host) => {
+    expect(sshArguments(host).slice(-2)).toEqual([host, HOST_LAUNCHER_COMMAND]);
+  });
 
   test.each([
     "-oProxyCommand=x",
@@ -127,7 +130,11 @@ describe("resolveLiveMedia", () => {
       const ssh = new FakeSsh();
       const spawn = vi.fn(() => ssh);
       const resolveTarget = vi.fn(async () => ({ kind: "local" }) as const);
-      const createMedia = await resolveLiveMedia({ audioHost: "me@audio-pc", resolveTarget, spawn });
+      const createMedia = await resolveLiveMedia({
+        audioHost: "me@audio-pc",
+        resolveTarget,
+        spawn,
+      });
       expect(resolveTarget).not.toHaveBeenCalled();
       expect(spawn).not.toHaveBeenCalled();
 

@@ -39,7 +39,10 @@ export interface RemoteMediaOptions {
   closeMs?: number;
   /** How often the host is pinged so it knows this side is alive. */
   pingMs?: number;
-  /** The Tailscale node id of the computer being typed on; no device opens on any other host. */
+  /**
+   * The Tailscale node id of the computer being typed on; no device opens on any other host.
+   * Unset when the user named the host, which is then trusted.
+   */
   expectedNode?: string;
 }
 

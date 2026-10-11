@@ -15,7 +15,7 @@ const host = await jiti.import("./host.ts");
 
 if (process.argv[2] === "register") {
   if (process.platform === "win32") {
-    console.error("Remote live voice cannot use a Windows computer's microphone yet.");
+    console.error("Only a Linux computer can provide the audio for remote live voice for now.");
     process.exit(1);
   }
   const { path } = host.registerLauncher({ entry: fileURLToPath(import.meta.url) });

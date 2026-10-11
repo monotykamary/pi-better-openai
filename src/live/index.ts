@@ -193,7 +193,7 @@ export function registerOpenAILive(
           sessionId: ctx.sessionManager.getSessionId(),
           voice: cfg.live.voice,
           getCredentials: (signal) => getCodexCredentials(ctx, signal),
-          resolveMedia: () => resolveLiveMedia(),
+          resolveMedia: () => resolveLiveMedia({ audioHost: cfg.live.audioHost }),
           delegate: (request) => {
             pi.sendMessage(
               {

@@ -128,7 +128,7 @@ export function acquireHostLock(
 ): Promise<{ close(): void }> {
   if (platform !== "linux") {
     return Promise.reject(
-      new Error("Remote live voice cannot use this computer's microphone yet."),
+      new Error("Only a Linux computer can provide the audio for remote live voice for now."),
     );
   }
   return new Promise((resolve, reject) => {

@@ -8,11 +8,10 @@ import { type TailscaleJson, tailscaleJson } from "./tailscale.ts";
 
 const HERDR_TIMEOUT_MS = 3_000;
 const MAX_HERDR_RESPONSE_BYTES = 1_048_576;
-const SSH_MARKERS = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] as const;
 // A MagicDNS machine name. Anything else could be read by ssh as an option.
-export const HOST_LABEL = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
+const HOST_LABEL = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 
-/** Why /live will not pick a microphone; shown to the user as is. */
+/** Why /live will not pick an audio computer; shown to the user as is. */
 export class OriginError extends Error {
   constructor(message: string) {
     super(message);
@@ -195,7 +194,7 @@ async function identify(connection: string, tailscale: TailscaleJson): Promise<M
   const os = typeof peer.OS === "string" ? peer.OS : "this operating system";
   if (os.toLowerCase() !== "linux") {
     throw new OriginError(
-      `Remote live voice does not support ${os} as the microphone computer yet.`,
+      `Remote live voice does not support ${os} as the audio computer yet; only Linux can be one for now.`,
     );
   }
   const host = typeof node.Name === "string" ? (node.Name.split(".")[0] ?? "") : "";
@@ -206,34 +205,20 @@ async function identify(connection: string, tailscale: TailscaleJson): Promise<M
 }
 
 /**
- * Chooses whose microphone and speakers /live uses, from what Herdr knows about who typed in this
- * pane. It only ever answers "this computer" when that is proven or when nothing suggests a
- * remote user; every other doubt is a refusal with a reason, never a guess.
+ * Finds the audio computer from what Herdr knows about who typed in this pane, for a Herdr build
+ * that reports it (`pane_last_input`). Without that, or outside Herdr, nothing is known and /live
+ * stays on this computer, as it always was. Once Herdr does report it, every doubt is a refusal
+ * with a reason, never a guess: a remote user's /live must not open this computer's microphone.
  */
 export async function resolveMediaTarget(deps: OriginDependencies = {}): Promise<MediaTarget> {
   const env = deps.env ?? process.env;
   const pane = env.HERDR_PANE_ID;
-  if (!env.HERDR_SOCKET_PATH || !pane) {
-    if (SSH_MARKERS.some((name) => env[name])) {
-      throw new OriginError(
-        "Pi is running in an SSH session outside Herdr, so the computer you are typing from cannot be told. Run Pi inside Herdr, or run /live on the computer with the microphone.",
-      );
-    }
-    return LOCAL;
-  }
+  if (!env.HERDR_SOCKET_PATH || !pane) return LOCAL;
   const herdr = deps.herdr ?? createHerdrClient({ env });
-  let capabilities: Json;
   try {
-    capabilities = await herdr.capabilities();
-  } catch (cause) {
-    throw new OriginError(
-      `Could not reach Herdr to find the computer you are typing from (${messageOf(cause)}).`,
-    );
-  }
-  if (capabilities.pane_last_input !== true) {
-    throw new OriginError(
-      "Live voice inside Herdr needs a Herdr that reports which computer typed in a pane (pane_last_input). Update Herdr, or run /live outside it on the computer with the microphone.",
-    );
+    if ((await herdr.capabilities()).pane_last_input !== true) return LOCAL;
+  } catch {
+    return LOCAL; // A Herdr that cannot be asked cannot say who typed either.
   }
   let input: unknown;
   try {
