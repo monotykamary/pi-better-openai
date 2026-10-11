@@ -38,7 +38,8 @@ announce the same node ID in its `hello` before B asks it to open a device.
 
 ## One-time setup
 
-- **Every computer:** Tailscale CLI, and the package installed through Pi's personal settings.
+- **Every computer:** Tailscale CLI, and the package installed through Pi's personal settings
+  (`pi install npm:…` or `pi install git:…`).
 - **A (microphone):** starting Pi once with the personal install writes the launcher
   `~/.pi/agent/live-host/media-host` (B always looks in the default agent dir, so a custom
   `PI_CODING_AGENT_DIR` on A is not supported). Copies loaded with `-e`, from a project, or from a path
@@ -85,7 +86,8 @@ Run per pair (B, A), from A through Herdr. Mark a cell only after doing it.
 - `client.ts` / `companion.ts` / `protocol.ts`: the Pi-side media, the host loop, and the framing
   (versioned, size-bounded, strictly validated; ping and a 20 s lease so a vanished Pi host
   releases the microphone).
-- `host.ts`, `media-host.mjs`: launcher, per-user lock, runtime directory; loads the TypeScript
+- `host.ts`, `media-host.mjs`: launcher, per-user lock (a Linux abstract socket the kernel frees
+  when the host dies), runtime directory; loads the TypeScript
   through `jiti` because Node refuses `.ts` inside `node_modules`.
 - `tailscale.ts`: CLI lookup.
 

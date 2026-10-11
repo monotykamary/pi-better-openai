@@ -4,11 +4,9 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { connect, createServer } from "node:net";
-import { userInfo } from "node:os";
+import { createServer } from "node:net";
 import { dirname, join, sep } from "node:path";
 import { piAgentDir } from "../../paths.ts";
 
@@ -64,18 +62,29 @@ export function registerLauncher(options: LauncherOptions): { path: string; chan
 }
 
 /**
- * Keeps the launcher fresh, but only for the copy Pi installed from the personal settings
- * (`<agent dir>/npm/node_modules`). Checkouts, `-e` paths and project copies never write it, so
- * they cannot take over what the pinned release set up. This guards against accidents, not
- * against other extensions, which already run as the same user.
+ * Keeps the launcher fresh, but only for the copy Pi installed from the personal settings, under
+ * `<agent dir>/npm/node_modules` or `<agent dir>/git`. Checkouts, `-e` paths and project copies
+ * never write it, so they cannot take over what the pinned release set up. Symlinks are followed,
+ * so a link out of an install is judged by where it really points. This guards against accidents,
+ * not against other extensions, which already run as the same user.
  */
 export function registerPersonalLauncher(
   options: LauncherOptions,
 ): { path: string; changed: boolean } | undefined {
   if ((options.platform ?? process.platform) === "win32") return undefined;
+  const agentDir = options.agentDir ?? piAgentDir();
   try {
-    const personal = realpathSync(join(options.agentDir ?? piAgentDir(), "npm", "node_modules"));
-    if (!realpathSync(options.entry).startsWith(personal + sep)) return undefined;
+    const entry = realpathSync(options.entry);
+    const installed = [join(agentDir, "npm", "node_modules"), join(agentDir, "git")].some(
+      (root) => {
+        try {
+          return entry.startsWith(realpathSync(root) + sep);
+        } catch {
+          return false; // That kind of install does not exist here.
+        }
+      },
+    );
+    if (!installed) return undefined;
   } catch {
     return undefined;
   }
@@ -107,46 +116,29 @@ export class HostBusyError extends Error {
   }
 }
 
-function hostLockPath(): string {
-  return process.platform === "win32"
-    ? `\\\\.\\pipe\\pi-better-openai-live-host-${userInfo().username}`
-    : join(hostDirectory(), "lock.sock");
-}
-
-function isHeld(path: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const probe = connect(path);
-    probe.once("connect", () => {
-      probe.destroy();
-      resolve(true);
-    });
-    probe.once("error", () => resolve(false));
-  });
-}
-
 /**
- * One media host per user. The lock is a local socket that nothing talks to: the operating system
- * frees it when the host dies, so there is no pid to go stale. A socket file left by a killed
- * host refuses connections and is taken over.
+ * One media host per user, held by the kernel: an abstract Unix socket (a name, not a file) goes
+ * away with the process that bound it, so a crash leaves nothing behind to clean up and nothing
+ * for two starting hosts to race over. Only Linux has these; the other systems are not media
+ * hosts yet, so they say so instead of pretending to be busy.
  */
-export async function acquireHostLock(path = hostLockPath()): Promise<{ close(): void }> {
-  if (process.platform !== "win32") mkdirSync(dirname(path), { recursive: true });
-  for (const reclaim of [true, false]) {
-    const server = createServer((socket) => socket.destroy());
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(path, resolve);
-      });
-      server.unref();
-      return { close: () => void server.close() };
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== "EADDRINUSE") throw cause;
-      if (!reclaim || process.platform === "win32" || (await isHeld(path))) {
-        throw new HostBusyError();
-      }
-      rmSync(path, { force: true });
-    }
+export function acquireHostLock(
+  name = `pi-better-openai-live-host-${process.getuid?.()}`,
+  platform: NodeJS.Platform = process.platform,
+): Promise<{ close(): void }> {
+  if (platform !== "linux") {
+    return Promise.reject(
+      new Error("Remote live voice cannot use this computer's microphone yet."),
+    );
   }
-  throw new HostBusyError();
+  return new Promise((resolve, reject) => {
+    const server = createServer((socket) => socket.destroy());
+    server.once("error", (cause) =>
+      reject((cause as NodeJS.ErrnoException).code === "EADDRINUSE" ? new HostBusyError() : cause),
+    );
+    server.listen(`\0${name}`, () => {
+      server.unref();
+      resolve({ close: () => void server.close() });
+    });
+  });
 }
