@@ -485,6 +485,52 @@ describe("RemoteLiveMedia (client)", () => {
     await expect(media.createOffer()).rejects.toThrow();
   });
 
+  test("a destroyed host output, which closes without ending, ends the session too", async () => {
+    const { proc, callbacks, media } = clientSetup();
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    proc.stdout.destroy();
+    await vi.waitFor(() => expect(callbacks.onFailure).toHaveBeenCalledOnce());
+    expect(proc.stdin.writableEnded).toBe(true);
+    expect(proc.kill).toHaveBeenCalled();
+    await expect(media.createOffer()).rejects.toThrow();
+  });
+
+  test("closing from the failure callback waits for the host to be gone", async () => {
+    const { proc, callbacks, media } = clientSetup();
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    let exited = false;
+    proc.once("exit", () => (exited = true));
+    proc.kill.mockImplementation((signal) => {
+      if (signal === "SIGKILL") queueMicrotask(() => proc.exit(null, "SIGKILL"));
+      return true;
+    });
+    let reentrant: Promise<void> | undefined;
+    callbacks.onFailure.mockImplementation(() => {
+      reentrant = media.close();
+    });
+    proc.stdout.write("this is not a protocol frame\n");
+    await vi.waitFor(() => expect(reentrant).toBeDefined());
+    await reentrant;
+    expect(exited).toBe(true);
+    expect(proc.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  test("closing from the failure callback still sees a host that cannot be stopped", async () => {
+    const { proc, callbacks, media } = clientSetup();
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    proc.kill.mockImplementation(() => true);
+    let reentrant: Promise<void> | undefined;
+    callbacks.onFailure.mockImplementation(() => {
+      reentrant = media.close();
+    });
+    proc.stdout.write("this is not a protocol frame\n");
+    await vi.waitFor(() => expect(reentrant).toBeDefined());
+    await expect(reentrant).rejects.toThrow("did not exit");
+  });
+
   test("close escalates to SIGKILL when the host ignores SIGTERM, and waits for the exit", async () => {
     const { proc, media } = clientSetup();
     acceptOpen(proc);
