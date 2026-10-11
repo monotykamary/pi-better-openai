@@ -10,6 +10,7 @@ import {
   resolveMediaTarget,
 } from "../src/live/remote/origin.ts";
 import { selfNodeId, tailscaleJson } from "../src/live/remote/tailscale.ts";
+import { resolveLiveMedia } from "../src/live/remote/route.ts";
 
 const IN_HERDR = { HERDR_SOCKET_PATH: "/herdr.sock", HERDR_PANE_ID: "p_1" };
 const TYPED_LOCALLY = { source: "client", client: { connected: true, via: "local" } };
@@ -302,6 +303,48 @@ describe("Herdr transport", () => {
       expect(fake.requests[1]?.params).toEqual({ pane_id: "p_9" });
     });
 
+    // Released Herdr builds: an old pong carries no capability list at all, a newer one lists
+    // capabilities without pane_last_input. Neither is a failure; both mean "it does not say".
+    test.each([
+      ["a pong without capabilities (v0.6.0)", { type: "pong", version: "0.6.0", protocol: 8 }],
+      ["a pong with null capabilities", { type: "pong", version: "0.6.0", capabilities: null }],
+      ["a pong with capabilities but not pane_last_input", { type: "pong", capabilities: {} }],
+    ])("%s is a Herdr that does not report who typed", async (_name, pong) => {
+      const fake = await fakeHerdr(
+        (request) => `${JSON.stringify({ id: request.id, result: pong })}\n`,
+      );
+      const env = { HERDR_SOCKET_PATH: fake.path, HERDR_PANE_ID: "p_1" };
+      const client = createHerdrClient({ env });
+      await expect(client.capabilities()).resolves.toEqual(
+        (pong as { capabilities?: object | null }).capabilities ?? {},
+      );
+
+      // The whole path, as a user in a released Herdr pane meets it: /live stays on this computer.
+      const t = tailnet();
+      await expect(resolveMediaTarget({ env, tailscale: t.run })).resolves.toEqual({
+        kind: "local",
+      });
+      await expect(
+        resolveLiveMedia({
+          resolveTarget: () => resolveMediaTarget({ env: { ...env, SSH_TTY: "x" } }),
+        }),
+      ).resolves.toBeUndefined();
+      expect(fake.requests.map((r) => r.method)).not.toContain("pane.last_input");
+      expect(t.run).not.toHaveBeenCalled();
+    });
+
+    test.each([
+      ["capabilities that are not an object", { type: "pong", capabilities: "yes" }],
+      ["capabilities that are a list", { type: "pong", capabilities: ["pane_last_input"] }],
+      ["a result that is not an object", "pong"],
+      ["no result at all", null],
+    ])("%s is a malformed answer, so /live refuses", async (_name, result) => {
+      const fake = await fakeHerdr((request) => `${JSON.stringify({ id: request.id, result })}\n`);
+      const env = { HERDR_SOCKET_PATH: fake.path, HERDR_PANE_ID: "p_1" };
+      await expect(createHerdrClient({ env }).capabilities()).rejects.toThrow(/unexpected/);
+      await expect(resolveMediaTarget({ env })).rejects.toThrow(/Could not reach Herdr/);
+    });
+
     test.each([
       ["an error answer", (id: string) => `${JSON.stringify({ id, error: { code: "x" } })}\n`],
       ["an answer for another request", () => `${JSON.stringify({ id: "other", result: {} })}\n`],
@@ -329,6 +372,12 @@ describe("Herdr transport", () => {
       ["pane", "last-input", "p_9"],
     ]);
 
+    run.mockResolvedValueOnce({ running: true });
+    await expect(client.capabilities()).resolves.toEqual({});
+    run.mockResolvedValueOnce({ running: true, capabilities: null });
+    await expect(client.capabilities()).resolves.toEqual({});
+    run.mockResolvedValueOnce({ running: true, capabilities: "yes" });
+    await expect(client.capabilities()).rejects.toThrow(/unexpected/);
     run.mockResolvedValueOnce({ running: false });
     await expect(client.capabilities()).rejects.toThrow(/unavailable/);
     run.mockResolvedValueOnce({ result: { type: "pane_last_input", pane_id: "other" } });
