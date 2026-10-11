@@ -393,13 +393,13 @@ describe("RemoteLiveMedia (client)", () => {
   });
 
   test.each([
-    ["another computer", { type: "hello", node: "nSOMEONE" } as HostFrame],
-    ["a host that cannot say who it is", { type: "hello" } as HostFrame],
-  ])("never opens devices on %s", async (_name, hello) => {
+    ["another computer", { type: "hello", node: "nSOMEONE" } as HostFrame, "not the computer"],
+    ["a host that cannot say who it is", { type: "hello" } as HostFrame, "Tailscale must be"],
+  ])("never opens devices on %s", async (_name, hello, reason) => {
     const { proc, callbacks, media } = clientSetup({ expectedNode: "nTYPIST" });
     const offer = media.createOffer();
     proc.host(hello);
-    await expect(offer).rejects.toThrow("not the computer");
+    await expect(offer).rejects.toThrow(reason);
     expect(proc.written).toEqual([]);
     expect(callbacks.onFailure).toHaveBeenCalledOnce();
     expect(JSON.stringify(callbacks.onFailure.mock.calls)).not.toContain("nSOMEONE");
