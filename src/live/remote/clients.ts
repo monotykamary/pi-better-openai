@@ -138,16 +138,20 @@ export async function runProcessTable(
   return table;
 }
 
-// `herdr` as a program (first word, or the end of a path), and the `server` subcommand of it.
-const HERDR = /(?:^|[\\/])herdr(?:\.exe)?"?(?:\s|$)/i;
-const HERDR_SERVER = /(?:^|[\\/])herdr(?:\.exe)?"?\s+server(?:\s|$)/i;
+// `herdr` as the program a command line starts (a path, quoted on Windows when it has spaces), and
+// what follows it.
+const HERDR_PROGRAM =
+  /^(?:"(?:[^"]*[\\/])?herdr(?:\.exe)?"|(?:[^\s"]*[\\/])?herdr(?:\.exe)?)(?:\s+|$)/i;
 const BRIDGE = /\bremote-client-bridge\b/i;
+const SERVER = /^server\b/i;
 const SSH_SESSION = /\bsshd\b/i;
 
 /**
- * The processes that may be a remote Herdr client: anything running Herdr's bridge command, and any
- * other `herdr` (not its server) that sshd started, however it is named or launched. It is all a
- * computer without `ss` and `/proc` can tell; a client reached some other way is not seen.
+ * The processes that may be a remote Herdr client: Herdr's own bridge command, and anything sshd
+ * started that is `herdr` (not its server) or runs the bridge command under another name. It is all
+ * a computer without `ss` and `/proc` can tell; a client reached some other way is not seen. An
+ * `ssh` whose remote command is the bridge is this computer's client reaching another server, the
+ * opposite direction, and is not one.
  */
 export function remoteHerdrClients(table: ProcessInfo[]): ProcessInfo[] {
   const byPid = new Map(table.map((entry) => [entry.pid, entry]));
@@ -159,9 +163,11 @@ export function remoteHerdrClients(table: ProcessInfo[]): ProcessInfo[] {
     }
     return false;
   };
-  return table.filter(
-    (entry) =>
-      BRIDGE.test(entry.command) ||
-      (HERDR.test(entry.command) && !HERDR_SERVER.test(entry.command) && underSshd(entry)),
-  );
+  return table.filter((entry) => {
+    const herdr = HERDR_PROGRAM.exec(entry.command);
+    const args = herdr ? entry.command.slice(herdr[0].length) : undefined;
+    if (args !== undefined && BRIDGE.test(args)) return true;
+    const candidate = args === undefined ? BRIDGE.test(entry.command) : !SERVER.test(args);
+    return candidate && underSshd(entry);
+  });
 }
