@@ -82,7 +82,11 @@ describe("resolveLiveMedia", () => {
   test("this computer keeps the local media and starts nothing", async () => {
     const spawn = vi.fn();
     await expect(
-      resolveLiveMedia({ resolveTarget: async () => ({ kind: "local" }), spawn }),
+      resolveLiveMedia({
+        audioHost: "auto",
+        resolveTarget: async () => ({ kind: "local" }),
+        spawn,
+      }),
     ).resolves.toBeUndefined();
     expect(spawn).not.toHaveBeenCalled();
   });
@@ -91,12 +95,13 @@ describe("resolveLiveMedia", () => {
     const spawn = vi.fn();
     await expect(
       resolveLiveMedia({
+        audioHost: "auto",
         resolveTarget: async () => {
-          throw new OriginError("Herdr cannot tell");
+          throw new OriginError("cannot tell");
         },
         spawn,
       }),
-    ).rejects.toThrow("Herdr cannot tell");
+    ).rejects.toThrow("cannot tell");
     expect(spawn).not.toHaveBeenCalled();
   });
 
@@ -104,6 +109,7 @@ describe("resolveLiveMedia", () => {
     const ssh = new FakeSsh();
     const spawn = vi.fn(() => ssh);
     const createMedia = await resolveLiveMedia({
+      audioHost: "auto",
       resolveTarget: async () => ({ kind: "remote", host: "laptop", node: "nLAPTOP" }),
       spawn,
     });
@@ -167,10 +173,34 @@ describe("resolveLiveMedia", () => {
       expect(spawn).not.toHaveBeenCalled();
     });
 
-    test("an empty setting means no choice: what Herdr says decides", async () => {
+    test.each([undefined, "", "  "])(
+      "an unset setting (%j) is this computer, and nothing is looked up or started",
+      async (audioHost) => {
+        const spawn = vi.fn();
+        const resolveTarget = vi.fn(
+          async () => ({ kind: "remote", host: "x", node: "n" }) as const,
+        );
+        await expect(
+          resolveLiveMedia({ audioHost, resolveTarget, spawn }),
+        ).resolves.toBeUndefined();
+        expect(resolveTarget).not.toHaveBeenCalled();
+        expect(spawn).not.toHaveBeenCalled();
+      },
+    );
+
+    test("auto looks the computer up once, as of the moment /live was asked", async () => {
       const resolveTarget = vi.fn(async () => ({ kind: "local" }) as const);
-      await expect(resolveLiveMedia({ audioHost: "", resolveTarget })).resolves.toBeUndefined();
-      expect(resolveTarget).toHaveBeenCalledOnce();
+      await expect(
+        resolveLiveMedia({ audioHost: "auto", askedAt: 1234, resolveTarget }),
+      ).resolves.toBeUndefined();
+      expect(resolveTarget).toHaveBeenCalledExactlyOnceWith(1234);
+    });
+
+    test("only the exact word auto asks; a host that merely starts with it is a host", async () => {
+      const resolveTarget = vi.fn(async () => ({ kind: "local" }) as const);
+      const createMedia = await resolveLiveMedia({ audioHost: "automation-pc", resolveTarget });
+      expect(createMedia).toBeTypeOf("function");
+      expect(resolveTarget).not.toHaveBeenCalled();
     });
   });
 });

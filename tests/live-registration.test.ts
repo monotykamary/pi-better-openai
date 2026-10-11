@@ -266,6 +266,88 @@ describe("registerOpenAILive", () => {
     expect(notifyUnfocused).not.toHaveBeenCalled();
   });
 
+  test("looks the audio computer up when /live is asked, and the session reuses that answer", async () => {
+    const harness = createRegistrationHarness();
+    const sessions: Array<ReturnType<typeof makeSessionStub>> = [];
+    const arbiter = makeFakeArbiter();
+    const media = vi.fn();
+    const resolveLiveMedia = vi.fn(async () => media);
+    registerOpenAILive(
+      harness.pi,
+      () => makeResolvedConfig({ live: { enabled: true, voice: "sol", audioHost: "auto" } }),
+      {
+        createSession: (options) => {
+          const stub = makeSessionStub(options);
+          sessions.push(stub);
+          return stub;
+        },
+        createArbiter: arbiter.createArbiter,
+        probeFocusReporting: vi.fn(async () => true),
+        attachFocusReporting: vi.fn(() => vi.fn()),
+        notifyActivatedUnfocused: vi.fn(),
+        tickMs: 60_000,
+        resolveLiveMedia,
+      },
+    );
+    const before = Date.now();
+    const captured: CapturedCustom = { component: undefined, tui: makeFakeTui() };
+    const run = commandFrom(harness).handler("", makeContext(makeCustomMock(captured)));
+    await vi.waitFor(() => {
+      requireCallbacks(arbiter);
+    });
+    // The keystroke that asked for /live is the evidence; it must not wait for the floor.
+    expect(resolveLiveMedia).toHaveBeenCalledExactlyOnceWith({
+      audioHost: "auto",
+      askedAt: expect.toSatisfy((at: number) => at >= before && at <= Date.now()),
+    });
+    requireCallbacks(arbiter).onActivated("focus");
+    await run;
+    await expect(sessions[0]!.options.resolveMedia!()).resolves.toBe(media);
+    expect(resolveLiveMedia).toHaveBeenCalledOnce();
+  });
+
+  test("a refused lookup surfaces when the session asks, not as an unhandled rejection", async () => {
+    const harness = createRegistrationHarness();
+    const sessions: Array<ReturnType<typeof makeSessionStub>> = [];
+    const arbiter = makeFakeArbiter();
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      registerOpenAILive(
+        harness.pi,
+        () => makeResolvedConfig({ live: { enabled: true, voice: "sol", audioHost: "auto" } }),
+        {
+          createSession: (options) => {
+            const stub = makeSessionStub(options);
+            sessions.push(stub);
+            return stub;
+          },
+          createArbiter: arbiter.createArbiter,
+          probeFocusReporting: vi.fn(async () => true),
+          attachFocusReporting: vi.fn(() => vi.fn()),
+          notifyActivatedUnfocused: vi.fn(),
+          tickMs: 60_000,
+          resolveLiveMedia: async () => {
+            throw new Error("cannot tell");
+          },
+        },
+      );
+      const captured: CapturedCustom = { component: undefined, tui: makeFakeTui() };
+      const run = commandFrom(harness).handler("", makeContext(makeCustomMock(captured)));
+      await vi.waitFor(() => {
+        requireCallbacks(arbiter);
+      });
+      // Long enough for an unobserved rejection to be reported, before any session asks.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).not.toHaveBeenCalled();
+      requireCallbacks(arbiter).onActivated("focus");
+      await run;
+      await expect(sessions[0]!.options.resolveMedia!()).rejects.toThrow("cannot tell");
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
   test("hands the chosen audio host to the session, so it is reached over ssh", async () => {
     const harness = createRegistrationHarness();
     const sessions: Array<ReturnType<typeof makeSessionStub>> = [];
