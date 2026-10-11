@@ -14,6 +14,7 @@ export const LEVELS_HIGH_WATER_BYTES = 64 * 1024;
 export const MAX_PENDING_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_IN_FLIGHT_REQUESTS = 16;
 const FLUSH_TIMEOUT_MS = 250;
+const DEFAULT_CLOSE_TIMEOUT_MS = 3_000;
 
 export interface CompanionOptions {
   /** Protocol frames from the Pi host (the process's stdin). */
@@ -24,6 +25,8 @@ export interface CompanionOptions {
   createMedia: LiveMediaFactory;
   diagnostics?: (message: string) => void;
   signal?: AbortSignal;
+  /** How long closing the media may take before the host gives up and exits anyway. */
+  closeTimeoutMs?: number;
 }
 
 type Request = Extract<ClientFrame, { type: "request" }>;
@@ -212,7 +215,7 @@ class MediaHost {
     let exitCode = code;
     if (media) {
       try {
-        await media.close();
+        await closeWithin(media, this.#options.closeTimeoutMs ?? DEFAULT_CLOSE_TIMEOUT_MS);
       } catch (cause) {
         this.#diagnose(`Closing the media failed: ${messageOf(cause)}`);
         exitCode ||= 1;
@@ -221,6 +224,20 @@ class MediaHost {
     await flush(output);
     this.#finish(exitCode);
     return exitCode;
+  }
+}
+
+/** A media that cannot close must not keep the process, and so the microphone, alive. */
+async function closeWithin(media: LiveMedia, timeoutMs: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("Closing the media timed out.")), timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([media.close(), timedOut]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
