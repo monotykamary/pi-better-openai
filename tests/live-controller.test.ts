@@ -1,5 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
-import { LiveSessionController } from "../src/live/controller.ts";
+import {
+  LiveSessionController,
+  type LiveSessionControllerOptions,
+} from "../src/live/controller.ts";
 import type { LiveNativeBindings } from "../src/live/native.ts";
 import type { LiveClientMessage } from "../src/live/protocol.ts";
 import type { LiveTransportOptions } from "../src/live/transport.ts";
@@ -310,5 +313,80 @@ describe("LiveSessionController", () => {
     expect(terminal).toHaveBeenCalledOnce();
     expect(terminal.mock.calls[0]?.[0]?.message).toContain("only digital silence");
     await controller.stop();
+  });
+
+  describe("where the media lives", () => {
+    function startable(overrides: Partial<LiveSessionControllerOptions>) {
+      const created: LiveTransportOptions[] = [];
+      const terminal = vi.fn();
+      const controller = new LiveSessionController({
+        sessionId: "session-1",
+        native: fakeNative(),
+        getCredentials: vi.fn(async () => undefined),
+        delegate: vi.fn(),
+        createTransport: (options) => {
+          created.push(options);
+          return {
+            connect: vi.fn(async () => undefined),
+            send: vi.fn(async () => undefined),
+            setMuted: vi.fn(),
+            close: vi.fn(async () => undefined),
+          };
+        },
+        callbacks: {
+          onPhase: vi.fn(),
+          onLevels: vi.fn(),
+          onTranscript: vi.fn(),
+          onTerminal: terminal,
+        },
+        ...overrides,
+      });
+      return { controller, created, terminal };
+    }
+
+    test("asks at each start and gives the transport the media it was told to use", async () => {
+      const createMedia = vi.fn();
+      const resolveMedia = vi.fn(async () => createMedia);
+      const { controller, created } = startable({ resolveMedia });
+      await controller.start();
+      expect(resolveMedia).toHaveBeenCalledOnce();
+      expect(created[0]?.createMedia).toBe(createMedia);
+    });
+
+    test("keeps the transport's own local media when nothing else is chosen", async () => {
+      const { controller, created } = startable({ resolveMedia: async () => undefined });
+      await controller.start();
+      expect(created[0]).toBeDefined();
+      expect(created[0]?.createMedia).toBeUndefined();
+      const plain = startable({});
+      await plain.controller.start();
+      expect(plain.created[0]?.createMedia).toBeUndefined();
+    });
+
+    test("a refused route fails the start without creating any transport", async () => {
+      const refusal = new Error("Herdr cannot tell which computer typed");
+      const { controller, created, terminal } = startable({
+        resolveMedia: async () => {
+          throw refusal;
+        },
+      });
+      await expect(controller.start()).rejects.toBe(refusal);
+      expect(created).toEqual([]);
+      expect(terminal).toHaveBeenCalledOnce();
+      expect(terminal).toHaveBeenCalledWith(refusal);
+    });
+
+    test("stopping while the route is being worked out leaves nothing behind", async () => {
+      let answer!: (media: undefined) => void;
+      const { controller, created } = startable({
+        resolveMedia: () => new Promise((resolve) => (answer = resolve)),
+      });
+      const starting = controller.start();
+      starting.catch(() => undefined);
+      await controller.stop();
+      answer(undefined);
+      await expect(starting).rejects.toThrow();
+      expect(created).toEqual([]);
+    });
   });
 });

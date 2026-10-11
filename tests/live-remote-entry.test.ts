@@ -1,5 +1,13 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -44,8 +52,15 @@ console.log(JSON.stringify({ capture: typeof bindings.AudioCapture, factory: typ
   return { entry: join(pkg, "src/live/remote/media-host.mjs"), probe, root };
 }
 
-function startHost(entry: string, cwd: string) {
-  const child = spawn(process.execPath, [entry], { cwd, stdio: ["pipe", "pipe", "pipe"] });
+/** No Tailscale on PATH and a private agent dir, so the host neither names itself nor shares a lock. */
+function isolatedEnv(extraPath = ""): NodeJS.ProcessEnv {
+  const agentDir = mkdtempSync(join(tmpdir(), "live-host-agent-"));
+  roots.push(agentDir);
+  return { ...process.env, PI_CODING_AGENT_DIR: agentDir, PATH: extraPath || agentDir };
+}
+
+function startHost(entry: string, cwd: string, env: NodeJS.ProcessEnv = isolatedEnv()) {
+  const child = spawn(process.execPath, [entry], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
   const frames: HostFrame[] = [];
   const decoder = new FrameDecoder(parseHostFrame);
   let stdout = "";
@@ -130,6 +145,63 @@ describe("media-host.mjs loaded from a node_modules layout", () => {
       const code = await new Promise<number | null>((done) => child.once("exit", done));
       expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
       expect(JSON.parse(stdout)).toEqual({ capture: "function", factory: "function" });
+    },
+    30_000,
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "announces the Tailscale node id of its computer in hello",
+    async () => {
+      const { entry, root } = installLayout();
+      const bin = mkdtempSync(join(tmpdir(), "live-host-bin-"));
+      roots.push(bin);
+      writeFileSync(join(bin, "tailscale"), `#!/bin/sh\necho '{"Self":{"ID":"nFAKE123"}}'\n`, {
+        mode: 0o755,
+      });
+      const host = startHost(entry, root, isolatedEnv(bin));
+      await until(() => host.frames.length > 0, "hello");
+      expect(host.frames).toEqual([{ type: "hello", node: "nFAKE123" }]);
+      host.child.stdin.end();
+      await expect(host.exited).resolves.toBe(0);
+    },
+    30_000,
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "a second host for the same user is told it is busy, before any device could open",
+    async () => {
+      const { entry, root } = installLayout();
+      const env = isolatedEnv();
+      const first = startHost(entry, root, env);
+      await until(() => first.frames.length > 0, "the first hello");
+      const second = startHost(entry, root, env);
+      await until(() => second.frames.length > 0, "the second hello");
+      second.child.stdin.write(encodeFrame({ type: "request", id: 1, method: "open" }));
+      await expect(second.exited).resolves.toBe(1);
+      expect(second.frames).toContainEqual({
+        type: "response",
+        id: 1,
+        ok: false,
+        error: expect.stringContaining("already using"),
+      });
+      first.child.stdin.end();
+      await expect(first.exited).resolves.toBe(0);
+    },
+    30_000,
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "registers its launcher when asked, without starting a session",
+    async () => {
+      const { entry, root } = installLayout();
+      const env = isolatedEnv();
+      const child = spawn(process.execPath, [entry, "register"], { cwd: root, env });
+      let stdout = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      await expect(new Promise((done) => child.once("exit", done))).resolves.toBe(0);
+      const launcher = join(env.PI_CODING_AGENT_DIR!, "live-host", "media-host");
+      expect(stdout).toContain(launcher);
+      expect(readFileSync(launcher, "utf8")).toContain(entry);
     },
     30_000,
   );

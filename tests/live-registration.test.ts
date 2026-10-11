@@ -238,6 +238,7 @@ describe("registerOpenAILive", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]!.options.voice).toBe("vale");
     expect(sessions[0]!.options.sessionId).toBe("session-7");
+    expect(sessions[0]!.options.resolveMedia).toBeTypeOf("function");
     expect(sessions[0]!.start).toHaveBeenCalledOnce();
     expect(sessions[0]!.stop).toHaveBeenCalledOnce();
     expect(arbiter.arbiter.leave).toHaveBeenCalledOnce();
