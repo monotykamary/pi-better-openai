@@ -106,7 +106,10 @@ class RemoteLiveMedia implements LiveMedia {
       this.#fail(`Live media host output failed: ${error.message}`),
     );
     // A host that stops talking without exiting would otherwise leave the session open for good.
-    child.stdout.on("end", () => this.#fail(`Live media host closed its output${this.#tail()}`));
+    // A destroyed stream closes without ending, so both are watched; failing is idempotent.
+    const outputGone = () => this.#fail(`Live media host closed its output${this.#tail()}`);
+    child.stdout.on("end", outputGone);
+    child.stdout.on("close", outputGone);
     child.stdin.on("error", (error) =>
       this.#fail(`Live media host input failed: ${error.message}`),
     );
@@ -307,9 +310,10 @@ class RemoteLiveMedia implements LiveMedia {
     this.#closed = true;
     this.#failure = new Error(message);
     this.#rejectAll(this.#failure);
-    this.#report(message);
+    // Before the callback, which may call close() and must get this promise, not a settled one.
     this.#stopPromise = this.#stopProcess(false);
     this.#stopPromise.catch(() => undefined);
+    this.#report(message);
   }
 
   #report(message: string): void {
