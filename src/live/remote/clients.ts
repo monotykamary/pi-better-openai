@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, readlink } from "node:fs/promises";
+import { access, readFile, readlink } from "node:fs/promises";
 import { promisify } from "node:util";
 
 /** Runs `ss` and returns its output; tests substitute this. */
@@ -49,9 +49,14 @@ function unixSockets(output: string): UnixSocket[] {
  * A client keeps a connection to the server's other listening socket (the API socket serves
  * one-off commands), and the kernel names both ends, so a client is whoever holds the other end of
  * a connection the server accepted there. Another session's server has its own sockets and clients.
- * Undefined when no process listens on `apiSocket`.
+ * `unowned` counts connections whose client `ss` shows no process for (another user's, or one that
+ * hides itself from `ss`): they are clients all the same, just not placed. Undefined when no
+ * process listens on `apiSocket`.
  */
-export function herdrClientPids(output: string, apiSocket: string): number[] | undefined {
+export function herdrClientPids(
+  output: string,
+  apiSocket: string,
+): { pids: number[]; unowned: number } | undefined {
   const sockets = unixSockets(output);
   const servers = new Set(
     sockets.filter((s) => s.state === "LISTEN" && s.path === apiSocket).flatMap((s) => s.pids),
@@ -68,19 +73,44 @@ export function herdrClientPids(output: string, apiSocket: string): number[] | u
       .filter((s) => s.state === "ESTAB" && clientSockets.has(s.path) && ownedByServer(s))
       .map((s) => s.peer),
   );
-  const clients = sockets
-    .filter((s) => accepted.has(s.inode))
-    .flatMap((s) => s.pids)
-    .filter((pid) => !servers.has(pid));
-  return [...new Set(clients)];
+  accepted.delete("0"); // The client already hung up.
+  const pids = new Set<number>();
+  let unowned = 0;
+  for (const peer of accepted) {
+    const owners = sockets
+      .filter((s) => s.inode === peer)
+      .flatMap((s) => s.pids)
+      .filter((pid) => !servers.has(pid));
+    if (owners.length === 0) unowned++;
+    for (const pid of owners) pids.add(pid);
+  }
+  return { pids: [...pids], unowned };
 }
 
-/** Whether the process reads its input from a terminal (Linux): a person's client does, a bridge's input is a pipe. */
+const TERMINAL = /^\/dev\/(pts\/\d+|tty\d*)$/;
+
+/**
+ * Whether the process reads its input from a terminal (Linux): a person's client does, a bridge's
+ * input is a pipe. A process that closed its stdin has none; `ENOENT` is only an error, "the
+ * process left", when `/proc/<pid>` is gone too.
+ */
 export async function hasTerminal(
   pid: number,
   readLink: (path: string) => Promise<string> = (path) => readlink(path),
+  exists: (path: string) => Promise<boolean> = (path) =>
+    access(path).then(
+      () => true,
+      () => false,
+    ),
 ): Promise<boolean> {
-  return /^\/dev\/(pts\/\d+|tty\d*)$/.test(await readLink(`/proc/${pid}/fd/0`));
+  try {
+    return TERMINAL.test(await readLink(`/proc/${pid}/fd/0`));
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT" && (await exists(`/proc/${pid}`))) {
+      return false;
+    }
+    throw cause;
+  }
 }
 
 export interface ProcessInfo {
@@ -121,7 +151,9 @@ export async function runProcessTable(
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.CommandLine)" }',
+            // Windows hides the command line of an elevated process from an unelevated reader;
+            // its name stands in, marked, so the row is not an empty one.
+            'Get-CimInstance Win32_Process | ForEach-Object { $c = $_.CommandLine; if (-not $c) { $c = "$($_.Name) (unreadable command line)" }; "$($_.ProcessId) $($_.ParentProcessId) $c" }',
           ],
         ]
       : [
@@ -145,11 +177,14 @@ const HERDR_PROGRAM =
 const BRIDGE = /\bremote-client-bridge\b/i;
 const SERVER = /^server\b/i;
 const SSH_SESSION = /\bsshd\b/i;
+const UNREADABLE = "(unreadable command line)";
 
 /**
  * The processes that may be a remote Herdr client: Herdr's own bridge command, and anything sshd
  * started that is `herdr` (not its server) or runs the bridge command under another name. It is all
- * a computer without `ss` and `/proc` can tell; a client reached some other way is not seen. An
+ * a computer without `ss` and `/proc` can tell; a client reached some other way is not seen. A
+ * Herdr process whose command line is hidden (or a hidden one that sshd started) cannot be told from
+ * a bridge, so it counts as one. An
  * `ssh` whose remote command is the bridge is this computer's client reaching another server, the
  * opposite direction, and is not one.
  */
@@ -164,6 +199,9 @@ export function remoteHerdrClients(table: ProcessInfo[]): ProcessInfo[] {
     return false;
   };
   return table.filter((entry) => {
+    if (entry.command === "" || entry.command.endsWith(UNREADABLE)) {
+      return entry.command === "" ? underSshd(entry) : HERDR_PROGRAM.test(entry.command);
+    }
     const herdr = HERDR_PROGRAM.exec(entry.command);
     const args = herdr ? entry.command.slice(herdr[0].length) : undefined;
     if (args !== undefined && BRIDGE.test(args)) return true;

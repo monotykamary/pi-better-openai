@@ -52,6 +52,15 @@ export interface OriginDependencies {
 
 type Json = Record<string, unknown>;
 
+interface Client {
+  pid: number;
+  /** Its SSH_CONNECTION: set for a remote client. */
+  connection?: string;
+  recognized: boolean;
+  /** Why its process could not be read, when it could not. */
+  unreadable?: string;
+}
+
 function isRecord(value: unknown): value is Json {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -140,6 +149,8 @@ async function resolveFromProcesses(
   deps: OriginDependencies,
   platform: NodeJS.Platform,
   reason: string,
+  /** Clients Pi could not read: each must be in the list, or it may be someone else's. */
+  unread: number[] = [],
 ): Promise<MediaTarget> {
   let table: ProcessInfo[];
   try {
@@ -149,10 +160,18 @@ async function resolveFromProcesses(
       `Could not list the processes to look for remote Herdr clients (${messageOf(cause)}). ${SET_AUDIO_HOST}`,
     );
   }
-  if (remoteHerdrClients(table).length === 0) return LOCAL;
-  throw new OriginError(
-    `A remote Herdr client is attached to this computer, and ${reason}, so Pi cannot tell whether you are typing from it. ${SET_AUDIO_HOST}`,
-  );
+  if (remoteHerdrClients(table).length > 0) {
+    throw new OriginError(
+      `A remote Herdr client is attached to this computer, and ${reason}, so Pi cannot tell whether you are typing from it. ${SET_AUDIO_HOST}`,
+    );
+  }
+  const unseen = unread.find((pid) => !table.some((entry) => entry.pid === pid));
+  if (unseen !== undefined) {
+    throw new OriginError(
+      `A Herdr client (process ${unseen}) could not be read and is not in the process list, so Pi cannot tell whether it is remote. ${SET_AUDIO_HOST}`,
+    );
+  }
+  return LOCAL;
 }
 
 /**
@@ -187,25 +206,28 @@ async function resolveInHerdr(
   } catch (cause) {
     return resolveFromProcesses(deps, platform, `Pi could not run \`ss\` (${messageOf(cause)})`);
   }
-  const pids = herdrClientPids(sockets, apiSocket);
-  if (pids === undefined) {
+  const attached = herdrClientPids(sockets, apiSocket);
+  if (attached === undefined) {
     throw new OriginError(
       `Could not find the Herdr server of this pane (nothing listens on ${apiSocket}). ${SET_AUDIO_HOST}`,
     );
   }
+  if (attached.unowned > 0) {
+    throw new OriginError(
+      `Pi can't tell which computer is connected to this Herdr: a client of its server belongs to a process Pi cannot see. ${SET_AUDIO_HOST}`,
+    );
+  }
   const found = await Promise.all(
-    pids.map(async (pid) => {
+    attached.pids.map(async (pid): Promise<Client | undefined> => {
       try {
         // A bridge has the SSH connection it came in on, a person's client a terminal; anything
         // else (a bridge that was renamed or redesigned) cannot be placed.
         const connection = await connectionOf(pid);
-        return { connection, recognized: connection !== undefined || (await isTerminal(pid)) };
+        return { pid, connection, recognized: connection !== undefined || (await isTerminal(pid)) };
       } catch (cause) {
         const code = (cause as NodeJS.ErrnoException).code;
         if (code === "ENOENT" || code === "ESRCH") return undefined; // It left in the meantime.
-        throw new OriginError(
-          `Could not read where a Herdr client is connected from (${messageOf(cause)}). ${SET_AUDIO_HOST}`,
-        );
+        return { pid, recognized: false, unreadable: messageOf(cause) };
       }
     }),
   );
@@ -215,9 +237,23 @@ async function resolveInHerdr(
       `Found no Herdr client attached to this pane's server, so the computer you are typing from cannot be told. ${SET_AUDIO_HOST}`,
     );
   }
-  if (clients.some((client) => !client.recognized)) {
+  if (clients.some((client) => !client.recognized && client.unreadable === undefined)) {
     throw new OriginError(
       `Pi can't tell which computer is connected to this Herdr: a client of its server is neither at a terminal here nor an SSH connection Pi can read. ${SET_AUDIO_HOST}`,
+    );
+  }
+  const unreadable = clients.filter((client) => client.unreadable !== undefined);
+  if (unreadable.length > 0) {
+    const why = `Pi could not read where a Herdr client is connected from (${unreadable[0]?.unreadable})`;
+    // A client known to be remote makes the process list no proof of anything.
+    if (clients.some((client) => client.connection !== undefined)) {
+      throw new OriginError(`${why}. ${SET_AUDIO_HOST}`);
+    }
+    return resolveFromProcesses(
+      deps,
+      platform,
+      why,
+      unreadable.map((client) => client.pid),
     );
   }
   const local = clients.some((client) => client.connection === undefined);
