@@ -61,8 +61,14 @@ Outside Herdr nothing depends on the operating system: Pi's own `SSH_CONNECTION`
    it has none and its stdin is a terminal (`/proc/<pid>/fd/0` is a `/dev/pts/N` or `/dev/ttyN`; a
    bridge's is a pipe). A client that is neither, such as a redesigned bridge that no longer
    inherits sshd's environment, **refuses** with "Pi can't tell which computer is connected to this
-   Herdr", even next to clients that are recognized. An unreadable process refuses; one that exited
-   meanwhile is skipped.
+   Herdr", even next to clients that are recognized. A process that exited meanwhile is skipped,
+   but one that only closed its stdin (no `/proc/<pid>/fd/0` while `/proc/<pid>` is there) is not
+   at a terminal. A connection whose client `ss` shows no process for (another user's, or one that
+   made itself non-dumpable) is a client too, just not placed, so it refuses the same way; one
+   that already hung up (peer inode 0) is not a client.
+   A client whose `/proc` cannot be read (`EACCES`) goes to the process list (below), which
+   answers this computer only if it shows no remote Herdr client and shows that client itself; next
+   to a client already known to be remote it refuses.
 3. One origin: it is that computer (`identify`: `tailscale whois`, same Tailscale user, Linux, a
    machine name safe for `ssh`; its media host must announce the same node ID in its `hello`).
 4. Several origins (this computer's own client plus a remote one, or two remote computers):
@@ -106,7 +112,12 @@ A process is a possible remote client when it is:
 - a `herdr` that is not its `server` and has `sshd` as an ancestor (a client started by hand in an
   SSH session, or a bridge whose subcommand was renamed); or
 - anything else with `remote-client-bridge` in its command and `sshd` as an ancestor (the bridge
-  under another binary name).
+  under another binary name); or
+- a process whose command line is hidden. Windows hides it for elevated processes from an
+  unelevated reader (`CommandLine` is null), so the PowerShell listing puts the program's name and
+  `(unreadable command line)` in its place. A hidden `herdr` counts, whatever its parent, since it
+  cannot be told from a bridge; so does a nameless row under `sshd`. A hidden `sshd` is still
+  `sshd` by its name, and a hidden process that is not Herdr changes nothing.
 
 An `ssh` whose remote command is `herdr remote-client-bridge` is **not** one. That is this
 computer's own Herdr client reaching another computer's server (the opposite direction), and a
