@@ -182,7 +182,7 @@ describe.skipIf(process.platform !== "linux")("host lock", () => {
     const lock = name();
     const child = spawn(process.execPath, [
       "-e",
-      `require("node:net").createServer().listen("\0" + ${JSON.stringify(lock)}, () => console.log("up"))`,
+      `require("node:net").createServer().listen("\\0" + ${JSON.stringify(lock)}, () => console.log("up"))`,
     ]);
     await new Promise<void>((resolve) => child.stdout.once("data", () => resolve()));
     await expect(acquireHostLock(lock)).rejects.toBeInstanceOf(HostBusyError);
