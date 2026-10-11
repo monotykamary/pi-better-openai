@@ -40,7 +40,8 @@ announce the same node ID in its `hello` before B asks it to open a device.
 
 - **Every computer:** Tailscale CLI, and the package installed through Pi's personal settings.
 - **A (microphone):** starting Pi once with the personal install writes the launcher
-  `~/.pi/agent/live-host/media-host`. Copies loaded with `-e`, from a project, or from a path
+  `~/.pi/agent/live-host/media-host` (B always looks in the default agent dir, so a custom
+  `PI_CODING_AGENT_DIR` on A is not supported). Copies loaded with `-e`, from a project, or from a path
   never write it. A Linux session needs PipeWire or PulseAudio; `XDG_RUNTIME_DIR` is filled in when
   SSH leaves it unset.
 - **B to A:** `ssh <tailscale machine name>` must work without prompts (keys, or Tailscale SSH).
