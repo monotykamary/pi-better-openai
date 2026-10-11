@@ -10,7 +10,6 @@ const IN_HERDR = { HERDR_SOCKET_PATH: API, HERDR_PANE_ID: "p_1" };
 const SERVER = 100;
 const FROM_LAPTOP = "100.96.150.40 51234 100.64.0.1 22";
 const FROM_DESKTOP = "100.96.150.41 40000 100.64.0.1 22";
-const ASKED_AT = 10_000;
 
 const owners = (...pids: number[]) =>
   `users:(${pids.map((pid) => `("herdr",pid=${pid},fd=3)`).join(",")})`;
@@ -38,46 +37,20 @@ function unixSockets(clients: number[], options: { other?: string[]; api?: numbe
   return [...lines, ...(options.other ?? [])].join("\n");
 }
 
-/** `ss -t -i` for one established connection, as the kernel reports it. */
-function tcpInfo(local: string, peer: string, lastrcv: number) {
-  return (
-    `0 0 ${local} ${peer}\n` +
-    `\t cubic wscale:10,10 rto:214 bytes_sent:920066 bytes_received:168550 segs_in:12263 ` +
-    `data_segs_in:4466 lastsnd:${lastrcv + 5} lastrcv:${lastrcv} lastack:1975 pacing_rate 1bps\n`
-  );
-}
-
 interface World {
   unix?: string;
-  /** Milliseconds since each connection's peer last sent data, keyed by the SSH_CONNECTION. */
-  lastrcv?: Record<string, number>;
   /** SSH_CONNECTION of each client process; a process missing here has none. */
   connections?: Record<number, string>;
-  clock?: number;
 }
 
 function world(w: World = {}) {
   const ss = vi.fn(async (args: string[]) => {
-    if (args.includes("-x")) {
-      if (w.unix === undefined)
-        throw Object.assign(new Error("spawn ss ENOENT"), { code: "ENOENT" });
-      return w.unix;
-    }
-    const peer = args[args.indexOf("dst") + 1];
-    const entry = Object.entries(w.lastrcv ?? {}).find(([connection]) => {
-      const [source, port] = connection.split(" ");
-      return peer === `${source}:${port}`;
-    });
-    return entry ? tcpInfo(args[args.indexOf("src") + 1] ?? "", peer ?? "", entry[1]) : "";
+    if (!args.includes("-x")) throw new Error("only the unix socket table is ever read");
+    if (w.unix === undefined) throw Object.assign(new Error("spawn ss ENOENT"), { code: "ENOENT" });
+    return w.unix;
   });
   const connectionOf = vi.fn(async (pid: number) => w.connections?.[pid]);
-  return {
-    ss,
-    sshConnectionOf: connectionOf,
-    askedAt: ASKED_AT,
-    now: () => ASKED_AT + (w.clock ?? 30),
-    platform: "linux" as const,
-  };
+  return { ss, sshConnectionOf: connectionOf, platform: "linux" as const };
 }
 
 /** A tailnet where this computer is nB, owned by user 7, with a laptop, a desktop, a Mac and a stranger's box. */
@@ -238,7 +211,6 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
   const laptopOnly = () => ({
     unix: unixSockets([200]),
     connections: { 200: FROM_LAPTOP },
-    lastrcv: { [FROM_LAPTOP]: 3000 },
   });
 
   test("ignores the SSH variables Pi inherited: panes carry the server's, not the typist's", async () => {
@@ -260,8 +232,6 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
       host: "laptop",
       node: "nLAPTOP",
     });
-    // Only the one client exists, so nobody has to measure who typed.
-    expect(w.ss.mock.calls.every(([args]) => args.includes("-x"))).toBe(true);
   });
 
   test("one local client is this computer, without asking Tailscale", async () => {
@@ -325,103 +295,113 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
     await expect(resolve(IN_HERDR, { w: {} })).rejects.toThrow(/`ss`/);
   });
 
-  describe("with several computers attached, whoever's keystroke just arrived", () => {
-    const both = (lastrcv: Record<string, number>) => ({
-      unix: unixSockets([200, 300]),
-      connections: { 200: FROM_LAPTOP },
-      lastrcv,
+  describe("with several computers attached, nothing says who is typing, so it refuses", () => {
+    const refusal = (w: World) => resolve(IN_HERDR, { w });
+
+    test("this computer's own client and a remote one", async () => {
+      const attempt = refusal({ unix: unixSockets([200, 300]), connections: { 200: FROM_LAPTOP } });
+      await expect(attempt).rejects.toThrow(OriginError);
+      await expect(attempt).rejects.toThrow(/this computer and laptop/);
+      await expect(attempt).rejects.toThrow(/live\.audioHost/);
     });
 
-    test("the remote one whose connection just received data typed", async () => {
-      await expect(resolve(IN_HERDR, { w: both({ [FROM_LAPTOP]: 12 }) })).resolves.toEqual({
-        kind: "remote",
-        host: "laptop",
-        node: "nLAPTOP",
-      });
-    });
-
-    test("data that arrived before the keystroke is a heartbeat, so the local client typed", async () => {
-      // 4 s ago: well before the 30 ms between the keystroke and this lookup.
-      await expect(resolve(IN_HERDR, { w: both({ [FROM_LAPTOP]: 4_000 }) })).resolves.toEqual({
-        kind: "local",
-      });
-      // 300 ms is still before the keystroke, even allowing for Herdr's own latency.
-      await expect(resolve(IN_HERDR, { w: both({ [FROM_LAPTOP]: 300 }) })).resolves.toEqual({
-        kind: "local",
-      });
-    });
-
-    test("tolerates the delay from the network to the pane, but not more", async () => {
-      // Arrived 140 ms before the lookup started, 110 ms before the keystroke.
-      await expect(resolve(IN_HERDR, { w: both({ [FROM_LAPTOP]: 140 }) })).resolves.toMatchObject({
-        kind: "remote",
-      });
-      await expect(resolve(IN_HERDR, { w: both({ [FROM_LAPTOP]: 190 }) })).resolves.toEqual({
-        kind: "local",
-      });
-    });
-
-    test("a connection the kernel no longer lists did not type", async () => {
-      await expect(resolve(IN_HERDR, { w: both({}) })).resolves.toEqual({ kind: "local" });
-    });
-
-    test("two remote computers: the one that just received data typed", async () => {
-      const w = {
+    test("two remote computers", async () => {
+      const attempt = refusal({
         unix: unixSockets([200, 201]),
         connections: { 200: FROM_LAPTOP, 201: FROM_DESKTOP },
-      };
+      });
+      await expect(attempt).rejects.toThrow(/laptop and desktop/);
+      await expect(attempt).rejects.toThrow(/live\.audioHost/);
+    });
+
+    test("however recently one of them sent data: traffic cannot tell a keystroke from a keepalive", async () => {
+      const w = world({
+        unix: unixSockets([200, 300]),
+        connections: { 200: FROM_LAPTOP },
+      });
       await expect(
-        resolve(IN_HERDR, { w: { ...w, lastrcv: { [FROM_LAPTOP]: 3_000, [FROM_DESKTOP]: 8 } } }),
-      ).resolves.toMatchObject({ kind: "remote", host: "desktop" });
+        resolveMediaTarget({ env: IN_HERDR, tailscale: tailnet().run, ...w }),
+      ).rejects.toThrow(/live\.audioHost/);
+      // It never even looks at the connection, so there is nothing a keepalive could fake.
+      expect(w.ss.mock.calls.every(([args]) => args.includes("-x"))).toBe(true);
     });
 
-    test("two remote computers that both just received data are ambiguous, and it says who", async () => {
-      const w = {
-        unix: unixSockets([200, 201, 300]),
-        connections: { 200: FROM_LAPTOP, 201: FROM_DESKTOP },
-        lastrcv: { [FROM_LAPTOP]: 8, [FROM_DESKTOP]: 20 },
-      };
-      const refusal = resolve(IN_HERDR, { w });
-      await expect(refusal).rejects.toThrow(/laptop.*desktop|desktop.*laptop/);
-      await expect(refusal).rejects.toThrow(/live\.audioHost/);
+    test("one computer with several connections is still one computer", async () => {
+      await expect(
+        resolve(IN_HERDR, {
+          w: {
+            unix: unixSockets([200, 201]),
+            connections: { 200: FROM_LAPTOP, 201: "100.96.150.40 51999 100.64.0.1 22" },
+          },
+        }),
+      ).resolves.toEqual({ kind: "remote", host: "laptop", node: "nLAPTOP" });
     });
 
-    test("only remote computers and none just typed: refuses rather than guess", async () => {
-      const w = {
-        unix: unixSockets([200, 201]),
-        connections: { 200: FROM_LAPTOP, 201: FROM_DESKTOP },
-        lastrcv: { [FROM_LAPTOP]: 3_000, [FROM_DESKTOP]: 4_000 },
-      };
-      await expect(resolve(IN_HERDR, { w })).rejects.toThrow(/laptop.*desktop|desktop.*laptop/);
+    test("but that computer next to this computer's own client is two", async () => {
+      await expect(
+        refusal({
+          unix: unixSockets([200, 201, 300]),
+          connections: { 200: FROM_LAPTOP, 201: "100.96.150.40 51999 100.64.0.1 22" },
+        }),
+      ).rejects.toThrow(/this computer and laptop/);
     });
 
-    test("data that arrives after the keystroke is not the keystroke", async () => {
-      // The lookup ran 5 s late; a heartbeat 12 ms ago says nothing about what was typed at ASKED_AT.
-      const w = both({ [FROM_LAPTOP]: 12 });
-      await expect(resolve(IN_HERDR, { w: { ...w, clock: 5_030 } })).resolves.toEqual({
-        kind: "local",
+    test("a connection that is this computer's own is the same origin as its local client", async () => {
+      await expect(
+        resolve(IN_HERDR, {
+          w: {
+            unix: unixSockets([200, 300]),
+            connections: { 200: "100.96.150.45 51234 100.64.0.1 22" },
+          },
+        }),
+      ).resolves.toEqual({ kind: "local" });
+    });
+
+    test.each([
+      [
+        "another Tailscale user's computer",
+        "100.96.150.44 40000 100.64.0.1 22",
+        /100\.96\.150\.44/,
+      ],
+      [
+        "a computer Tailscale does not know",
+        "100.96.150.99 40000 100.64.0.1 22",
+        /100\.96\.150\.99/,
+      ],
+    ])(
+      "a computer it cannot identify (%s) is named by address",
+      async (_name, connection, named) => {
+        const attempt = refusal({
+          unix: unixSockets([200, 201]),
+          connections: { 200: FROM_LAPTOP, 201: connection },
+        });
+        await expect(attempt).rejects.toThrow(named);
+        await expect(attempt).rejects.toThrow(/live\.audioHost/);
+      },
+    );
+
+    test("Tailscale being down is still a refusal", async () => {
+      const down = vi.fn(async () => {
+        throw new Error("The Tailscale CLI was not found.");
       });
+      await expect(
+        resolve(IN_HERDR, {
+          tailscale: down,
+          w: { unix: unixSockets([200, 300]), connections: { 200: FROM_LAPTOP } },
+        }),
+      ).rejects.toThrow(/live\.audioHost/);
     });
+  });
 
-    test("asks the kernel about exactly the connection the client came in on", async () => {
-      const w = world(both({ [FROM_LAPTOP]: 12 }));
-      await resolveMediaTarget({ env: IN_HERDR, tailscale: tailnet().run, ...w });
-      const tcp = w.ss.mock.calls.map(([args]) => args).filter((args) => args.includes("-t"));
-      expect(tcp).toEqual([
-        [
-          "-H",
-          "-n",
-          "-t",
-          "-i",
-          "state",
-          "established",
-          "src",
-          "100.64.0.1:22",
-          "dst",
-          "100.96.150.40:51234",
-        ],
-      ]);
-    });
+  test("a lone remote client that is not usable refuses with the reason, not as a guess", async () => {
+    await expect(
+      resolve(IN_HERDR, {
+        w: {
+          unix: unixSockets([200]),
+          connections: { 200: "100.96.150.44 40000 100.64.0.1 22" },
+        },
+      }),
+    ).rejects.toThrow(/another Tailscale user/);
   });
 });
 

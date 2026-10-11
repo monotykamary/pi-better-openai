@@ -188,12 +188,10 @@ describe("resolveLiveMedia", () => {
       },
     );
 
-    test("auto looks the computer up once, as of the moment /live was asked", async () => {
+    test("auto looks the computer up once", async () => {
       const resolveTarget = vi.fn(async () => ({ kind: "local" }) as const);
-      await expect(
-        resolveLiveMedia({ audioHost: "auto", askedAt: 1234, resolveTarget }),
-      ).resolves.toBeUndefined();
-      expect(resolveTarget).toHaveBeenCalledExactlyOnceWith(1234);
+      await expect(resolveLiveMedia({ audioHost: "auto", resolveTarget })).resolves.toBeUndefined();
+      expect(resolveTarget).toHaveBeenCalledOnce();
     });
 
     test("only the exact word auto asks; a host that merely starts with it is a host", async () => {
