@@ -55,7 +55,7 @@ SOFTWARE.
 
 ## herdr-codex-voice
 
-`src/live/remote/origin.ts` adapts how a Herdr pane's typing client is read and identified (the `ping` capability check, `pane.last_input`, the Windows CLI route, and the Tailscale lookup of an SSH connection) from `client_origin.py` in [`herdr-codex-voice`](https://github.com/ricardofelixb/herdr-codex-voice).
+`src/live/remote/origin.ts` adapts how a computer is identified from the SSH connection it came in on (the `tailscale whois` of the source address, the same-user check, the peer list, and the operating-system check) from `client_origin.py` in [`herdr-codex-voice`](https://github.com/ricardofelixb/herdr-codex-voice).
 
 MIT License
 

@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- Add experimental remote audio for `/live`: set `live.audioHost` to an SSH host and the realtime session, Codex login, and coding agent stay on the Pi computer while a Linux computer's microphone and speakers carry the audio. Off by default.
-- Optionally find that computer automatically from a Herdr build that reports `pane_last_input` plus Tailscale; Herdr without it, and sessions outside Herdr, are unchanged.
-- Adapt Herdr client-origin lookup from [`herdr-codex-voice`](https://github.com/ricardofelixb/herdr-codex-voice) (MIT; see `THIRD_PARTY_NOTICES.md`).
+- Add experimental remote audio for `/live`: set `live.audioHost` to an SSH host and the realtime session, Codex login, and coding agent stay on the Pi computer while a Linux computer's microphone and speakers carry the audio. Unset by default, which changes nothing.
+- Set `live.audioHost` to `auto` to use the computer you are connected from, found from your SSH session or from the clients attached to a stock Herdr server, and named through Tailscale. It refuses rather than guess when it cannot tell.
+- Adapt the Tailscale lookup of an SSH connection from [`herdr-codex-voice`](https://github.com/ricardofelixb/herdr-codex-voice) (MIT; see `THIRD_PARTY_NOTICES.md`).
 
 ## 0.2.13
 

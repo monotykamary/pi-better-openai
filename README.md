@@ -248,21 +248,21 @@ The feature uses Codex Desktop's experimental `gpt-live-1-codex`/Quicksilver pro
 
 ### Remote audio (experimental)
 
-When Pi runs on one computer and you sit at another, such as a server you reach over SSH, `/live` can use the microphone and speakers of the computer you are at. Pi keeps the Codex login, the realtime session, and the coding agent; the audio computer only captures and plays sound. Only signaling, mute state, and levels cross the SSH connection, and no credential does. It is off unless you name the audio computer:
+When Pi runs on one computer and you sit at another, such as a server you reach over SSH, `/live` can use the microphone and speakers of the computer you are at. Pi keeps the Codex login, the realtime session, and the coding agent; the audio computer only captures and plays sound. Only signaling, mute state, and levels cross the SSH connection, and no credential does. It is off until you set `live.audioHost` in the config of the computer running Pi (see above) and run `/reload`:
 
-```json
-{ "live": { "audioHost": "me@audio-pc" } }
-```
-
-Put this in the Pi computer's config (see above), not on the audio computer itself, and run `/reload`. `audioHost` is a host name, an `ssh` config alias, or `user@host`, passed to plain `ssh`, so your SSH config (keys, `ProxyJump`, Tailscale SSH) applies. When it is set, `/live` always uses that computer; empty leaves `/live` on the computer running Pi, as before. It appears in `/openai-settings` under **Live voice**.
+| `live.audioHost`                                   | `/live` uses                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------- |
+| unset or empty                                     | the computer running Pi, as always; nothing is looked up                        |
+| `auto`                                             | the computer you are connected from (needs Tailscale; details below)            |
+| a host name, an `ssh` config alias, or `user@host` | that computer, over plain `ssh`, so your SSH config (keys, `ProxyJump`) applies |
 
 The audio computer needs:
 
 - A Linux desktop with PipeWire or PulseAudio. A Mac or Windows PC is refused with a message for now.
-- Key-based `ssh <audioHost>` from the Pi computer with no prompts. New host keys are accepted on first use; a changed key is refused.
+- Key-based `ssh` from the Pi computer with no prompts. New host keys are accepted on first use; a changed key is refused.
 - This package installed through Pi's personal settings (`pi install npm:@monotykamary/pi-better-openai`), with Pi started once there. That writes a small launcher at `~/.pi/agent/live-host/media-host`, which the Pi computer starts over SSH. Copies loaded with `-e` or from a project never write it.
 
-Optionally, with Tailscale on both computers under one account and a Herdr build that reports which client typed in a pane (`pane_last_input`), `/live` finds the computer you are typing from by itself, and `audioHost` is not needed. If it cannot tell who is typing, it refuses instead of using the Pi computer's microphone. A Herdr without that capability, and sessions outside Herdr, behave as if none of this existed. Details for contributors are in [`src/live/remote/README.md`](src/live/remote/README.md).
+`auto` works with plain SSH and with stock [Herdr](https://github.com/herdrdev/herdr); neither needs changes. It also needs Tailscale on both computers under one account, because that is how the connecting computer is named and checked. Outside Herdr it is the computer your own SSH session came from. Inside Herdr (Pi on Linux, with `ss` installed) it looks at the Herdr clients attached to the pane's server: one computer attached means that one; with several attached, such as the screen of the Pi computer and your laptop, the computer whose connection had just sent data when you ran `/live` is the one typing. A computer that is attached but idle can occasionally be taken for the typist, because its keepalive looks like a keystroke (about 2% of starts in our measurements; toggling `/live` again re-checks). When `auto` cannot tell, for example inside tmux over SSH or with several equally active computers, it refuses and asks you to set the SSH host explicitly rather than use a microphone nobody chose. Developer notes are in [`src/live/remote/README.md`](src/live/remote/README.md).
 
 ## Image generation
 
