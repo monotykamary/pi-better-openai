@@ -30,7 +30,7 @@ const callbacks = () => ({ onEvent: vi.fn(), onLevels: vi.fn(), onFailure: vi.fn
 
 describe("ssh to the media host", () => {
   test("is non-interactive, bounded, and cannot take the host for an option", () => {
-    expect(sshArguments("omarchybook")).toEqual([
+    expect(sshArguments("laptop")).toEqual([
       "-T",
       "-o",
       "BatchMode=yes",
@@ -43,7 +43,7 @@ describe("ssh to the media host", () => {
       "-o",
       "ServerAliveCountMax=3",
       "--",
-      "omarchybook",
+      "laptop",
       HOST_LAUNCHER_COMMAND,
     ]);
     expect(HOST_LAUNCHER_COMMAND).toBe("exec ~/.pi/agent/live-host/media-host");
@@ -104,12 +104,12 @@ describe("resolveLiveMedia", () => {
     const ssh = new FakeSsh();
     const spawn = vi.fn(() => ssh);
     const createMedia = await resolveLiveMedia({
-      resolveTarget: async () => ({ kind: "remote", host: "omarchybook", node: "nLAPTOP" }),
+      resolveTarget: async () => ({ kind: "remote", host: "laptop", node: "nLAPTOP" }),
       spawn,
     });
     expect(spawn).not.toHaveBeenCalled();
     const media = createMedia!(callbacks());
-    expect(spawn).toHaveBeenCalledWith("ssh", sshArguments("omarchybook"), expect.anything());
+    expect(spawn).toHaveBeenCalledWith("ssh", sshArguments("laptop"), expect.anything());
 
     const offer = media.createOffer();
     ssh.stdout.write(encodeFrame({ type: "hello", node: "nSOMEONE-ELSE" }));

@@ -124,7 +124,8 @@ Example config:
   },
   "live": {
     "enabled": true,
-    "voice": "sol"
+    "voice": "sol",
+    "audioHost": ""
   },
   "pets": {
     "enabled": false,
@@ -243,9 +244,25 @@ Choose the spoken voice under **Live voice** in `/openai-settings`. Supported va
 
 Live mode requires interactive TUI mode, microphone/speaker access, `openai-codex` OAuth, and one of these native targets: macOS arm64/x64, Linux arm64/x64, or Windows x64. Standard `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` settings are honored for signaling and sideband traffic. Audio/WebRTC uses the MIT-licensed native platform packages from [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi). The adapted implementation is attributed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). On macOS, launchd-managed LocalTerm users should rerun `localterm install` after upgrading LocalTerm and allow its microphone prompt.
 
-Inside Herdr, `/live` can use the microphone and speakers of the Linux computer you are typing from instead of the one running Pi. This is experimental and has had little real-device testing; see [`src/live/remote/README.md`](src/live/remote/README.md) for what it needs and how it chooses.
-
 The feature uses Codex Desktop's experimental `gpt-live-1-codex`/Quicksilver protocol rather than the public OpenAI Realtime API. Upstream protocol or entitlement changes may temporarily break it.
+
+### Remote audio (experimental)
+
+When Pi runs on one computer and you sit at another, such as a server you reach over SSH, `/live` can use the microphone and speakers of the computer you are at. Pi keeps the Codex login, the realtime session, and the coding agent; the audio computer only captures and plays sound. Only signaling, mute state, and levels cross the SSH connection, and no credential does. It is off unless you name the audio computer:
+
+```json
+{ "live": { "audioHost": "me@audio-pc" } }
+```
+
+Put this in the Pi computer's config (see above), not on the audio computer itself, and run `/reload`. `audioHost` is a host name, an `ssh` config alias, or `user@host`, passed to plain `ssh`, so your SSH config (keys, `ProxyJump`, Tailscale SSH) applies. When it is set, `/live` always uses that computer; empty leaves `/live` on the computer running Pi, as before. It appears in `/openai-settings` under **Live voice**.
+
+The audio computer needs:
+
+- A Linux desktop with PipeWire or PulseAudio. A Mac or Windows PC is refused with a message for now.
+- Key-based `ssh <audioHost>` from the Pi computer with no prompts. New host keys are accepted on first use; a changed key is refused.
+- This package installed through Pi's personal settings (`pi install npm:@monotykamary/pi-better-openai`), with Pi started once there. That writes a small launcher at `~/.pi/agent/live-host/media-host`, which the Pi computer starts over SSH. Copies loaded with `-e` or from a project never write it.
+
+Optionally, with Tailscale on both computers under one account and a Herdr build that reports which client typed in a pane (`pane_last_input`), `/live` finds the computer you are typing from by itself, and `audioHost` is not needed. If it cannot tell who is typing, it refuses instead of using the Pi computer's microphone. A Herdr without that capability, and sessions outside Herdr, behave as if none of this existed. Details for contributors are in [`src/live/remote/README.md`](src/live/remote/README.md).
 
 ## Image generation
 

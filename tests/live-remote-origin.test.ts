@@ -37,7 +37,7 @@ function tailnet(whois: Record<string, unknown> = {}) {
     calls.push(args);
     if (args[0] === "whois") {
       return {
-        Node: { StableID: "nLAPTOP", Name: "omarchybook.tailb4e5ae.ts.net.", User: 7, ...whois },
+        Node: { StableID: "nLAPTOP", Name: "laptop.example.ts.net.", User: 7, ...whois },
       };
     }
     return {
@@ -144,7 +144,7 @@ describe("which computer's microphone /live uses", () => {
     const t = tailnet();
     await expect(
       resolve(IN_HERDR, { herdr: herdr(typedOver(FROM_LAPTOP)), tailscale: t.run }),
-    ).resolves.toEqual({ kind: "remote", host: "omarchybook", node: "nLAPTOP" });
+    ).resolves.toEqual({ kind: "remote", host: "laptop", node: "nLAPTOP" });
     expect(t.calls).toContainEqual(["whois", "--json", "100.96.150.40"]);
   });
 
