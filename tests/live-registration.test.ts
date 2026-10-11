@@ -181,9 +181,13 @@ describe("registerOpenAILive", () => {
       throw new Error("read-only home");
     });
     expect(() =>
-      registerOpenAILive(harness.pi, () => makeResolvedConfig({ live: { enabled: true } }), {
-        registerLauncher,
-      }),
+      registerOpenAILive(
+        harness.pi,
+        () => makeResolvedConfig({ live: { enabled: true, voice: "vale" } }),
+        {
+          registerLauncher,
+        },
+      ),
     ).not.toThrow();
     expect(registerLauncher).toHaveBeenCalledOnce();
     expect(registerLauncher).toHaveBeenCalledWith({

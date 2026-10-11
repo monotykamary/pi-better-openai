@@ -21,6 +21,8 @@ class FakeSsh extends EventEmitter {
     super();
     const decoder = new FrameDecoder(parseClientFrame);
     this.stdin.on("data", (chunk: Buffer) => this.written.push(...decoder.push(chunk)));
+    // A real host leaves when its input ends.
+    this.stdin.once("end", () => queueMicrotask(() => this.emit("exit", 0, null)));
   }
 }
 
