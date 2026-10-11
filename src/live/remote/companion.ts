@@ -6,6 +6,7 @@ import {
   encodeFrame,
   FrameDecoder,
   type HostFrame,
+  LIVE_MEDIA_LEASE_MS,
   parseClientFrame,
   ProtocolError,
 } from "./protocol.ts";
@@ -27,6 +28,10 @@ export interface CompanionOptions {
   signal?: AbortSignal;
   /** How long closing the media may take before the host gives up and exits anyway. */
   closeTimeoutMs?: number;
+  /** This computer's Tailscale node id, announced in `hello` for the Pi host to check. */
+  nodeId?: string | undefined;
+  /** How long the Pi host may stay silent before the devices are closed. */
+  leaseMs?: number | undefined;
 }
 
 type Request = Extract<ClientFrame, { type: "request" }>;
@@ -53,6 +58,7 @@ class MediaHost {
   #media: LiveMedia | undefined;
   #stopping = false;
   #stopPromise: Promise<number> | undefined;
+  #lease: NodeJS.Timeout | undefined;
 
   constructor(options: CompanionOptions, finish: (code: number) => void) {
     this.#options = options;
@@ -70,11 +76,24 @@ class MediaHost {
     input.on("error", (error) => this.#fatal(`Input failed: ${error.message}`, false));
     if (signal?.aborted) void this.#stop(0);
     else signal?.addEventListener("abort", () => void this.#stop(0), { once: true });
-    this.#write({ type: "hello" });
+    this.#write({ type: "hello", ...(this.#options.nodeId ? { node: this.#options.nodeId } : {}) });
+    this.#touch();
+  }
+
+  /** The Pi host pings while it is alive; silence means it is gone, and so is the reason to listen. */
+  #touch(): void {
+    clearTimeout(this.#lease);
+    if (this.#stopping) return;
+    this.#lease = setTimeout(
+      () => this.#fatal("The Pi host has been silent; closing the microphone."),
+      this.#options.leaseMs ?? LIVE_MEDIA_LEASE_MS,
+    );
+    this.#lease.unref?.();
   }
 
   #onData(chunk: Buffer): void {
     if (this.#stopping) return;
+    this.#touch();
     try {
       for (const frame of this.#decoder.push(chunk)) {
         if (this.#stopping) return;
@@ -88,6 +107,7 @@ class MediaHost {
   #handle(frame: ClientFrame): void {
     if (!this.#media) {
       if (frame.type === "close") void this.#stop(0);
+      else if (frame.type === "ping") return;
       else if (frame.type === "request" && frame.method === "open") this.#open(frame.id);
       else throw new ProtocolError("The first request must be open.");
       return;
@@ -101,6 +121,8 @@ class MediaHost {
         break;
       case "mute":
         this.#control(() => this.#media?.setMuted(frame.muted));
+        break;
+      case "ping":
         break;
       case "close":
         void this.#stop(0);
@@ -209,6 +231,7 @@ class MediaHost {
 
   async #shutdown(code: number): Promise<number> {
     this.#stopping = true;
+    clearTimeout(this.#lease);
     this.#abort.abort();
     const { input, output } = this.#options;
     input.destroy();

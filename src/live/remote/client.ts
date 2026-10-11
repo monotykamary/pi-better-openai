@@ -5,6 +5,7 @@ import {
   encodeFrame,
   FrameDecoder,
   type HostFrame,
+  LIVE_MEDIA_PING_MS,
   MAX_REQUEST_TIMEOUT_MS,
   parseHostFrame,
 } from "./protocol.ts";
@@ -32,10 +33,14 @@ export interface RemoteMediaProcess {
   once(event: "error", listener: (error: Error) => void): unknown;
 }
 
-export interface RemoteMediaTimeouts {
+export interface RemoteMediaOptions {
   handshakeMs?: number;
   requestMs?: number;
   closeMs?: number;
+  /** How often the host is pinged so it knows this side is alive. */
+  pingMs?: number;
+  /** The Tailscale node id of the computer being typed on; no device opens on any other host. */
+  expectedNode?: string;
 }
 
 type Pending = {
@@ -46,7 +51,7 @@ type Pending = {
 
 export function createRemoteMediaFactory(
   spawn: () => RemoteMediaProcess,
-  timeouts: RemoteMediaTimeouts = {},
+  timeouts: RemoteMediaOptions = {},
 ): LiveMediaFactory {
   return (callbacks, signal) => new RemoteLiveMedia(spawn(), callbacks, timeouts, signal);
 }
@@ -62,6 +67,8 @@ class RemoteLiveMedia implements LiveMedia {
   readonly #handshakeMs: number;
   readonly #requestMs: number;
   readonly #closeMs: number;
+  readonly #pingMs: number;
+  readonly #expectedNode: string | undefined;
   readonly #decoder = new FrameDecoder(parseHostFrame);
   readonly #pending = new Map<number, Pending>();
   readonly #ready: Promise<void>;
@@ -76,11 +83,12 @@ class RemoteLiveMedia implements LiveMedia {
   #failure = new Error("Live media is closed.");
   #stderrTail = "";
   #stopPromise: Promise<void> | undefined;
+  #pinger: NodeJS.Timeout | undefined;
 
   constructor(
     child: RemoteMediaProcess,
     callbacks: LiveMediaCallbacks,
-    timeouts: RemoteMediaTimeouts,
+    timeouts: RemoteMediaOptions,
     signal?: AbortSignal,
   ) {
     this.#process = child;
@@ -88,6 +96,8 @@ class RemoteLiveMedia implements LiveMedia {
     this.#handshakeMs = timeouts.handshakeMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
     this.#requestMs = timeouts.requestMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.#closeMs = timeouts.closeMs ?? DEFAULT_CLOSE_TIMEOUT_MS;
+    this.#pingMs = timeouts.pingMs ?? LIVE_MEDIA_PING_MS;
+    this.#expectedNode = timeouts.expectedNode;
     this.#exited = new Promise((resolve) => (this.#resolveExited = resolve));
 
     const hello = new Promise<void>((resolve, reject) => {
@@ -256,9 +266,16 @@ class RemoteLiveMedia implements LiveMedia {
         this.#fail("Live media host sent a frame before its hello.");
         return;
       }
+      if (this.#expectedNode !== undefined && frame.node !== this.#expectedNode) {
+        // Neither id is reported: a wrong ssh alias must fail without teaching anything.
+        this.#fail("Live media host is not the computer you are typing from.");
+        return;
+      }
       this.#helloSeen = true;
       clearTimeout(this.#hello.timer);
       this.#hello.resolve();
+      this.#pinger = setInterval(() => this.#write({ type: "ping" }), this.#pingMs);
+      this.#pinger.unref?.();
       return;
     }
     switch (frame.type) {
@@ -323,6 +340,7 @@ class RemoteLiveMedia implements LiveMedia {
   }
 
   #rejectAll(error: Error): void {
+    clearInterval(this.#pinger);
     clearTimeout(this.#hello.timer);
     this.#hello.reject(error);
     for (const pending of this.#pending.values()) {

@@ -11,6 +11,10 @@ export const LIVE_MEDIA_PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 1_048_576;
 export const MAX_FAILURE_MESSAGE_LENGTH = 2_048;
 export const MAX_REQUEST_TIMEOUT_MS = 120_000;
+/** The Pi host pings this often; a media host hearing nothing for the lease closes the devices. */
+export const LIVE_MEDIA_PING_MS = 5_000;
+export const LIVE_MEDIA_LEASE_MS = 20_000;
+const MAX_NODE_ID_LENGTH = 256;
 
 export type ClientFrame =
   | { type: "request"; id: number; method: "open" | "createOffer" }
@@ -18,10 +22,12 @@ export type ClientFrame =
   | { type: "request"; id: number; method: "waitForOpen"; timeoutMs?: number }
   | { type: "activate" }
   | { type: "mute"; muted: boolean }
+  | { type: "ping" }
   | { type: "close" };
 
 export type HostFrame =
-  | { type: "hello" }
+  /** `node` is the media host's own Tailscale node id, so the Pi host can check who answered. */
+  | { type: "hello"; node?: string }
   | { type: "response"; id: number; ok: true; sdp?: string }
   | { type: "response"; id: number; ok: false; error: string }
   | { type: "event"; payload: string }
@@ -58,6 +64,7 @@ const isMessage: Check = (value) =>
 const isLevel: Check = (value) =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 const isBoolean: Check = (value) => typeof value === "boolean";
+const isNodeId: Check = (value) => isText(value) && (value as string).length <= MAX_NODE_ID_LENGTH;
 const isTimeout: Check = (value) =>
   typeof value === "number" &&
   Number.isInteger(value) &&
@@ -67,6 +74,7 @@ const isTimeout: Check = (value) =>
 const CLIENT_SHAPES = new Map<string, Shape>([
   ["activate", {}],
   ["close", {}],
+  ["ping", {}],
   ["mute", { required: { muted: isBoolean } }],
 ]);
 
@@ -78,7 +86,7 @@ const REQUEST_SHAPES = new Map<string, Shape>([
 ]);
 
 const HOST_SHAPES = new Map<string, Shape>([
-  ["hello", {}],
+  ["hello", { optional: { node: isNodeId } }],
   ["event", { required: { payload: isText } }],
   ["levels", { required: { input: isLevel, output: isLevel } }],
   ["failure", { required: { message: isMessage } }],
