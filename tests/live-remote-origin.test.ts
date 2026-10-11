@@ -294,10 +294,11 @@ describe("Herdr transport", () => {
   });
 
   test("on Windows it uses Herdr's own CLI, which knows the named pipe", async () => {
-    const run = vi.fn(async (args: string[]) =>
-      args[0] === "status"
-        ? { running: true, capabilities: { pane_last_input: true } }
-        : { result: { type: "pane_last_input", pane_id: "p_9", last_input: TYPED_LOCALLY } },
+    const run = vi.fn(
+      async (args: string[]): Promise<Record<string, unknown>> =>
+        args[0] === "status"
+          ? { running: true, capabilities: { pane_last_input: true } }
+          : { result: { type: "pane_last_input", pane_id: "p_9", last_input: TYPED_LOCALLY } },
     );
     const client = createHerdrClient({ env: {}, platform: "win32", runCli: run });
     await expect(client.capabilities()).resolves.toEqual({ pane_last_input: true });
