@@ -113,15 +113,16 @@ export function createHerdrClient(
   const runCli = options.runCli ?? ((args: string[]) => herdrCli(env, args));
   return {
     async capabilities() {
-      let capabilities: unknown;
+      let answer: unknown;
       if (windows) {
         const status = await runCli(["status", "server", "--json"]);
         if (status.running !== true) throw new Error("The current Herdr server is unavailable.");
-        capabilities = status.capabilities;
+        answer = status;
       } else {
-        const result = await rpc(env.HERDR_SOCKET_PATH ?? "", "ping", {});
-        capabilities = isRecord(result) ? result.capabilities : undefined;
+        answer = await rpc(env.HERDR_SOCKET_PATH ?? "", "ping", {});
       }
+      // Releases from before capabilities existed answer without the list: it says nothing.
+      const capabilities = isRecord(answer) ? (answer.capabilities ?? {}) : undefined;
       if (!isRecord(capabilities)) throw new Error("Herdr returned an unexpected answer.");
       return capabilities;
     },
