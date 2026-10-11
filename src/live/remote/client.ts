@@ -19,10 +19,12 @@ const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]+/g;
 
 /** The part of a child process the client needs, so tests can supply plain streams. */
 export interface RemoteMediaProcess {
+  /** Undefined when the process never started. */
+  pid?: number | undefined;
   stdin: Writable;
   stdout: Readable;
   stderr: Readable | null;
-  kill(): unknown;
+  kill(signal?: NodeJS.Signals): unknown;
   once(
     event: "exit",
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
@@ -73,7 +75,7 @@ class RemoteLiveMedia implements LiveMedia {
   #reported = false;
   #failure = new Error("Live media is closed.");
   #stderrTail = "";
-  #closePromise: Promise<void> | undefined;
+  #stopPromise: Promise<void> | undefined;
 
   constructor(
     child: RemoteMediaProcess,
@@ -103,6 +105,8 @@ class RemoteLiveMedia implements LiveMedia {
     child.stdout.on("error", (error) =>
       this.#fail(`Live media host output failed: ${error.message}`),
     );
+    // A host that stops talking without exiting would otherwise leave the session open for good.
+    child.stdout.on("end", () => this.#fail(`Live media host closed its output${this.#tail()}`));
     child.stdin.on("error", (error) =>
       this.#fail(`Live media host input failed: ${error.message}`),
     );
@@ -113,11 +117,14 @@ class RemoteLiveMedia implements LiveMedia {
     child.stderr?.on("error", () => undefined);
     child.once("exit", (code, exitSignal) => this.#onExit(code, exitSignal));
     child.once("error", (error) => {
-      this.#fail(`Live media host could not start: ${error.message}`);
-      this.#resolveExited();
+      // Also emitted when a running process could not be killed, which is not an exit.
+      const started = child.pid !== undefined;
+      this.#fail(`Live media host ${started ? "failed" : "could not start"}: ${error.message}`);
+      if (!started) this.#onExited();
     });
-    if (signal?.aborted) void this.close();
-    else signal?.addEventListener("abort", () => void this.close(), { once: true });
+    const closeQuietly = () => void this.close().catch(() => undefined);
+    if (signal?.aborted) closeQuietly();
+    else signal?.addEventListener("abort", closeQuietly, { once: true });
   }
 
   async #handshake(hello: Promise<void>): Promise<void> {
@@ -171,23 +178,26 @@ class RemoteLiveMedia implements LiveMedia {
     this.#notify({ type: "mute", muted });
   }
 
+  /** Resolves once the process has exited; rejects if it could not be made to. */
   close(): Promise<void> {
-    this.#closePromise ??= this.#close();
-    return this.#closePromise;
-  }
-
-  async #close(): Promise<void> {
     if (!this.#closed) {
       this.#closed = true;
       this.#rejectAll(this.#failure);
-      if (!this.#exitedAlready) {
-        this.#write({ type: "close" });
-        this.#endInput();
-      }
+      this.#stopPromise = this.#stopProcess(true);
     }
-    if (await this.#exitedWithin(this.#closeMs)) return;
-    this.#kill();
-    await this.#exitedWithin(this.#closeMs);
+    return this.#stopPromise ?? Promise.resolve();
+  }
+
+  /** Asks politely when the session is healthy, then escalates until the process is gone. */
+  async #stopProcess(graceful: boolean): Promise<void> {
+    if (graceful && !this.#exitedAlready) this.#write({ type: "close" });
+    this.#endInput();
+    if (graceful && (await this.#exitedWithin(this.#closeMs))) return;
+    for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+      this.#kill(signal);
+      if (await this.#exitedWithin(this.#closeMs)) return;
+    }
+    throw new Error("Live media host did not exit.");
   }
 
   #notify(frame: ClientFrame): void {
@@ -279,9 +289,13 @@ class RemoteLiveMedia implements LiveMedia {
     else pending.reject(new Error(frame.error));
   }
 
-  #onExit(code: number | null, signal: NodeJS.Signals | null): void {
+  #onExited(): void {
     this.#exitedAlready = true;
     this.#resolveExited();
+  }
+
+  #onExit(code: number | null, signal: NodeJS.Signals | null): void {
+    this.#onExited();
     if (this.#closed) return;
     const how = code === null ? `signal ${signal}` : `code ${code}`;
     this.#fail(`Live media host exited unexpectedly (${how})${this.#tail()}`);
@@ -294,8 +308,8 @@ class RemoteLiveMedia implements LiveMedia {
     this.#failure = new Error(message);
     this.#rejectAll(this.#failure);
     this.#report(message);
-    this.#endInput();
-    this.#kill();
+    this.#stopPromise = this.#stopProcess(false);
+    this.#stopPromise.catch(() => undefined);
   }
 
   #report(message: string): void {
@@ -322,10 +336,10 @@ class RemoteLiveMedia implements LiveMedia {
     }
   }
 
-  #kill(): void {
+  #kill(signal: NodeJS.Signals): void {
     if (this.#exitedAlready) return;
     try {
-      this.#process.kill();
+      this.#process.kill(signal);
     } catch {
       // The process may already be gone.
     }

@@ -62,6 +62,8 @@ class MediaHost {
   start(): void {
     const { input, output, signal } = this.#options;
     output.on("error", (error) => this.#fatal(`Output failed: ${error.message}`, false));
+    // A destroyed output closes without an error; nobody is listening any more.
+    output.on("close", () => this.#fatal("Output closed.", false));
     input.on("data", (chunk: Buffer) => this.#onData(chunk));
     input.on("end", () => void this.#stop(0));
     input.on("close", () => void this.#stop(0));
