@@ -109,6 +109,8 @@ class RemoteLiveMedia implements LiveMedia {
     child.stderr?.on("data", (chunk: Buffer | string) => {
       this.#stderrTail = (this.#stderrTail + chunk.toString()).slice(-STDERR_TAIL_CHARS);
     });
+    // Diagnostics are best-effort; an unhandled stream error must not take Pi down.
+    child.stderr?.on("error", () => undefined);
     child.once("exit", (code, exitSignal) => this.#onExit(code, exitSignal));
     child.once("error", (error) => {
       this.#fail(`Live media host could not start: ${error.message}`);
