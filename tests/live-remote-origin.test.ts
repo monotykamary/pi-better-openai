@@ -481,7 +481,27 @@ const SERVER_PROCESS = proc(741, 529, "herdr server");
 const TERMINAL = proc(3214, 1, "foot --working-directory=/home/u -e herdr");
 const LOCAL_CLIENT = proc(3235, 3214, "herdr");
 const BRIDGE = proc(1366, 1338, "/Users/u/.local/bin/herdr remote-client-bridge --idle-timeout-v1");
-const LOCAL_ONLY = [SERVER_PROCESS, TERMINAL, LOCAL_CLIENT, proc(900, 1, "node /usr/bin/pi")];
+// This computer's own Herdr client reaching other computers' servers: an ssh whose remote command is
+// the bridge. It is the opposite direction, so it is not a remote client of this computer's server.
+const OUTGOING = [
+  proc(
+    6419,
+    3235,
+    "ssh -C -F /tmp/herdr-ssh-3235-0/config -T mini printf ' %s ' 'herdr-remote-output-ready:1' exec /Users/u/.local/bin/herdr remote-client-bridge --idle-timeout-v1",
+  ),
+  proc(
+    6463,
+    3235,
+    "ssh -T orgo exec /root/.local/bin/herdr remote-client-bridge --idle-timeout-v1",
+  ),
+];
+const LOCAL_ONLY = [
+  SERVER_PROCESS,
+  TERMINAL,
+  LOCAL_CLIENT,
+  ...OUTGOING,
+  proc(900, 1, "node /usr/bin/pi"),
+];
 
 describe("where Pi cannot read the clients of Herdr's server", () => {
   // macOS and Windows, and Linux where `ss` cannot run: the only evidence is the process list, and
@@ -512,6 +532,11 @@ describe("where Pi cannot read the clients of Herdr's server", () => {
       expect(t.run).not.toHaveBeenCalled();
       expect(w.sshConnectionOf).not.toHaveBeenCalled();
       if (place.platform !== "linux") expect(w.ss).not.toHaveBeenCalled();
+    });
+
+    test("this computer's own connections out to other servers are not remote clients of it", async () => {
+      const { result } = attempt(place, [...LOCAL_ONLY, ...OUTGOING]);
+      await expect(result).resolves.toEqual({ kind: "local" });
     });
 
     test("a remote-client bridge refuses, naming the setting and not guessing local", async () => {
@@ -628,8 +653,15 @@ describe("the process list", () => {
     const windows = proc(77, 1, '"C:\\Program Files\\Herdr\\herdr.exe" remote-client-bridge');
     const table = [...LOCAL_ONLY, SSHD, BRIDGE, shell, handStarted, renamed, windows];
     expect(remoteHerdrClients(table)).toEqual([BRIDGE, handStarted, renamed, windows]);
-    // Neither the server nor a local client, nor the terminal that runs it, nor Pi.
+    // Neither the server nor a local client, nor the terminal that runs it, nor Pi, nor an ssh
+    // whose remote command is a bridge on some other computer.
     expect(remoteHerdrClients(LOCAL_ONLY)).toEqual([]);
+    // But an ssh that sshd started is somebody else's session, bridge command or not.
+    const relayed = proc(1450, 1338, "/opt/hd/relay remote-client-bridge");
+    expect(remoteHerdrClients([SSHD, relayed])).toEqual([relayed]);
+    // Herdr's own bridge is one wherever its parent is, even when the list cannot say where.
+    const orphan = proc(1451, 4242, '"C:\\Program Files\\Herdr\\herdr.exe" remote-client-bridge');
+    expect(remoteHerdrClients([orphan, ...LOCAL_ONLY])).toEqual([orphan]);
     // A server that was itself started over SSH is still not a client.
     expect(remoteHerdrClients([SSHD, proc(50, 1338, "/x/herdr server")])).toEqual([]);
     // Lines that merely mention herdr are not Herdr.
