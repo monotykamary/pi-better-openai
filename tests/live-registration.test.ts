@@ -175,6 +175,22 @@ describe("registerOpenAILive", () => {
     expect(harness.events).toEqual(["message_end", "agent_settled", "session_shutdown"]);
   });
 
+  test("keeps the media host launcher fresh at registration, and survives that failing", () => {
+    const harness = createRegistrationHarness();
+    const registerLauncher = vi.fn(() => {
+      throw new Error("read-only home");
+    });
+    expect(() =>
+      registerOpenAILive(harness.pi, () => makeResolvedConfig({ live: { enabled: true } }), {
+        registerLauncher,
+      }),
+    ).not.toThrow();
+    expect(registerLauncher).toHaveBeenCalledOnce();
+    expect(registerLauncher).toHaveBeenCalledWith({
+      entry: expect.stringMatching(/media-host\.mjs$/),
+    });
+  });
+
   test("rejects non-TUI and disabled invocations before opening custom UI", async () => {
     const harness = createRegistrationHarness();
     registerOpenAILive(harness.pi, () =>
