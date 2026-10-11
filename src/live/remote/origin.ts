@@ -1,7 +1,16 @@
 // The Tailscale lookup of an SSH connection is adapted from herdr-codex-voice's client_origin.py
 // (MIT, see THIRD_PARTY_NOTICES.md).
 import { isIP } from "node:net";
-import { herdrClientPids, runSs, type Ss, sshConnectionOf } from "./clients.ts";
+import {
+  type ProcessInfo,
+  hasTerminal,
+  herdrClientPids,
+  remoteHerdrClients,
+  runProcessTable,
+  runSs,
+  type Ss,
+  sshConnectionOf,
+} from "./clients.ts";
 import { type TailscaleJson, tailscaleJson } from "./tailscale.ts";
 
 // A MagicDNS machine name. Anything else could be read by ssh as an option.
@@ -9,6 +18,7 @@ const HOST_LABEL = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 const SSH_MARKERS = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] as const;
 const MULTIPLEXERS = ["TMUX", "STY", "ZELLIJ"] as const;
 const SET_AUDIO_HOST = "Set live.audioHost to the SSH host of the computer to use.";
+const PLATFORMS: Partial<Record<NodeJS.Platform, string>> = { darwin: "macOS", win32: "Windows" };
 
 /** Why /live will not pick an audio computer; shown to the user as is. */
 export class OriginError extends Error {
@@ -36,6 +46,8 @@ export interface OriginDependencies {
   tailscale?: TailscaleJson | undefined;
   ss?: Ss;
   sshConnectionOf?: (pid: number) => Promise<string | undefined>;
+  isTerminal?: (pid: number) => Promise<boolean>;
+  processes?: () => Promise<ProcessInfo[]>;
 }
 
 type Json = Record<string, unknown>;
@@ -120,6 +132,30 @@ async function identify(connection: string, tailscale: TailscaleJson): Promise<M
 }
 
 /**
+ * Where the clients of the pane's Herdr server cannot be read (no Linux sockets and /proc, or no
+ * `ss`), the process list can only show whether a remote client exists. None: this computer is the
+ * only one that can be typing. Any, or no list: refuse, since it may be the one typing.
+ */
+async function resolveFromProcesses(
+  deps: OriginDependencies,
+  platform: NodeJS.Platform,
+  reason: string,
+): Promise<MediaTarget> {
+  let table: ProcessInfo[];
+  try {
+    table = await (deps.processes ?? (() => runProcessTable(platform)))();
+  } catch (cause) {
+    throw new OriginError(
+      `Could not list the processes to look for remote Herdr clients (${messageOf(cause)}). ${SET_AUDIO_HOST}`,
+    );
+  }
+  if (remoteHerdrClients(table).length === 0) return LOCAL;
+  throw new OriginError(
+    `A remote Herdr client is attached to this computer, and ${reason}, so Pi cannot tell whether you are typing from it. ${SET_AUDIO_HOST}`,
+  );
+}
+
+/**
  * Whoever is attached to this pane's Herdr server and where from. Panes carry the server's
  * environment, not the typist's, so only the clients themselves can say: each is a process of this
  * user, a remote one with the SSH connection it came in on, a local one with none. One computer
@@ -130,22 +166,26 @@ async function resolveInHerdr(
   deps: OriginDependencies,
   tailscale: TailscaleJson,
 ): Promise<MediaTarget> {
-  if ((deps.platform ?? process.platform) !== "linux") {
-    throw new OriginError(
-      `Telling which computer you are typing from inside Herdr needs Linux on the computer running Pi for now. ${SET_AUDIO_HOST}`,
+  const platform = deps.platform ?? process.platform;
+  const apiSocket = env.HERDR_SOCKET_PATH;
+  if (platform !== "linux" || !apiSocket) {
+    return resolveFromProcesses(
+      deps,
+      platform,
+      platform === "linux"
+        ? "this pane has no Herdr socket path to read the clients from"
+        : `on ${PLATFORMS[platform] ?? platform} Pi cannot read who is attached`,
     );
   }
   const ss = deps.ss ?? runSs;
   const connectionOf = deps.sshConnectionOf ?? sshConnectionOf;
-  const apiSocket = env.HERDR_SOCKET_PATH ?? "";
+  const isTerminal = deps.isTerminal ?? hasTerminal;
 
   let sockets: string;
   try {
     sockets = await ss(["-H", "-n", "-x", "-a", "-p"]);
   } catch (cause) {
-    throw new OriginError(
-      `Could not run \`ss\` to find the Herdr clients (${messageOf(cause)}). ${SET_AUDIO_HOST}`,
-    );
+    return resolveFromProcesses(deps, platform, `Pi could not run \`ss\` (${messageOf(cause)})`);
   }
   const pids = herdrClientPids(sockets, apiSocket);
   if (pids === undefined) {
@@ -156,7 +196,10 @@ async function resolveInHerdr(
   const found = await Promise.all(
     pids.map(async (pid) => {
       try {
-        return { connection: await connectionOf(pid) };
+        // A bridge has the SSH connection it came in on, a person's client a terminal; anything
+        // else (a bridge that was renamed or redesigned) cannot be placed.
+        const connection = await connectionOf(pid);
+        return { connection, recognized: connection !== undefined || (await isTerminal(pid)) };
       } catch (cause) {
         const code = (cause as NodeJS.ErrnoException).code;
         if (code === "ENOENT" || code === "ESRCH") return undefined; // It left in the meantime.
@@ -170,6 +213,11 @@ async function resolveInHerdr(
   if (clients.length === 0) {
     throw new OriginError(
       `Found no Herdr client attached to this pane's server, so the computer you are typing from cannot be told. ${SET_AUDIO_HOST}`,
+    );
+  }
+  if (clients.some((client) => !client.recognized)) {
+    throw new OriginError(
+      `Pi can't tell which computer is connected to this Herdr: a client of its server is neither at a terminal here nor an SSH connection Pi can read. ${SET_AUDIO_HOST}`,
     );
   }
   const local = clients.some((client) => client.connection === undefined);
@@ -214,7 +262,7 @@ async function resolveInHerdr(
 export async function resolveMediaTarget(deps: OriginDependencies = {}): Promise<MediaTarget> {
   const env = deps.env ?? process.env;
   const tailscale = deps.tailscale ?? tailscaleJson;
-  if (env.HERDR_SOCKET_PATH && env.HERDR_PANE_ID) return resolveInHerdr(env, deps, tailscale);
+  if (env.HERDR_PANE_ID) return resolveInHerdr(env, deps, tailscale);
   if (!SSH_MARKERS.some((name) => env[name])) return LOCAL;
   const multiplexer = MULTIPLEXERS.find((name) => env[name]);
   if (multiplexer) {
