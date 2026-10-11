@@ -17,9 +17,7 @@ type SpawnSsh = (
 export interface RouteDependencies {
   /** `live.audioHost`: unset is this computer, `auto` the computer connected from, else an SSH host. */
   audioHost?: string;
-  /** When /live was asked; `auto` measures who typed against it. */
-  askedAt?: number;
-  resolveTarget?: (askedAt: number) => Promise<MediaTarget>;
+  resolveTarget?: () => Promise<MediaTarget>;
   spawn?: SpawnSsh;
 }
 
@@ -63,10 +61,9 @@ export async function resolveLiveMedia(
 ): Promise<LiveMediaFactory | undefined> {
   const setting = deps.audioHost?.trim();
   if (!setting) return undefined;
-  const askedAt = deps.askedAt ?? Date.now();
   const target =
     setting === "auto"
-      ? await (deps.resolveTarget ?? ((at) => resolveMediaTarget({ askedAt: at })))(askedAt)
+      ? await (deps.resolveTarget ?? resolveMediaTarget)()
       : { kind: "remote" as const, host: setting, node: undefined };
   if (target.kind === "local") return undefined;
   const args = sshArguments(target.host);

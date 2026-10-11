@@ -74,9 +74,3 @@ export function herdrClientPids(output: string, apiSocket: string): number[] | u
     .filter((pid) => !servers.has(pid));
   return [...new Set(clients)];
 }
-
-/** Milliseconds since the peer of the one connection in `ss -t -i` output last sent data. */
-export function lastReceivedMs(output: string): number | undefined {
-  const match = /\blastrcv:(\d+)/.exec(output);
-  return match ? Number(match[1]) : undefined;
-}

@@ -1,19 +1,13 @@
 // The Tailscale lookup of an SSH connection is adapted from herdr-codex-voice's client_origin.py
 // (MIT, see THIRD_PARTY_NOTICES.md).
 import { isIP } from "node:net";
-import { herdrClientPids, lastReceivedMs, runSs, type Ss, sshConnectionOf } from "./clients.ts";
+import { herdrClientPids, runSs, type Ss, sshConnectionOf } from "./clients.ts";
 import { type TailscaleJson, tailscaleJson } from "./tailscale.ts";
 
 // A MagicDNS machine name. Anything else could be read by ssh as an option.
 const HOST_LABEL = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 const SSH_MARKERS = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] as const;
 const MULTIPLEXERS = ["TMUX", "STY", "ZELLIJ"] as const;
-/**
- * How long before /live was asked a client's data may have arrived and still be the keystroke that
- * asked: the network to the pane is a few milliseconds, this allows for a busy machine. A client
- * whose last data is older is idle; one that sends a keepalive at that moment looks the same.
- */
-const KEYSTROKE_WINDOW_MS = 120;
 const SET_AUDIO_HOST = "Set live.audioHost to the SSH host of the computer to use.";
 
 /** Why /live will not pick an audio computer; shown to the user as is. */
@@ -42,9 +36,6 @@ export interface OriginDependencies {
   tailscale?: TailscaleJson | undefined;
   ss?: Ss;
   sshConnectionOf?: (pid: number) => Promise<string | undefined>;
-  /** When /live was asked: the keystroke that did it had just reached this computer. */
-  askedAt?: number;
-  now?: () => number;
 }
 
 type Json = Record<string, unknown>;
@@ -75,9 +66,6 @@ function parseConnection(connection: string) {
   }
   return { source, port: port!, destination, serverPort: serverPort! };
 }
-
-const hostPort = (address: string, port: string) =>
-  isIP(address) === 6 ? `[${address}]:${port}` : `${address}:${port}`;
 
 /** The address Tailscale can look up for an `SSH_CONNECTION` ("src sport dst dport") string. */
 function tailnetEndpoint(connection: string): string {
@@ -131,49 +119,11 @@ async function identify(connection: string, tailscale: TailscaleJson): Promise<M
   return { kind: "remote", host, node: stableId };
 }
 
-/** Whether the client that came in over `connection` has just sent data, as the kernel counts it. */
-async function justSentData(connection: string, ss: Ss, askedAt: number, now: () => number) {
-  const { source, port, destination, serverPort } = parseConnection(connection);
-  let output: string;
-  try {
-    output = await ss([
-      "-H",
-      "-n",
-      "-t",
-      "-i",
-      "state",
-      "established",
-      "src",
-      hostPort(destination, serverPort),
-      "dst",
-      hostPort(source, port),
-    ]);
-  } catch (cause) {
-    throw new OriginError(
-      `Could not ask the kernel which computer just typed (${messageOf(cause)}). ${SET_AUDIO_HOST}`,
-    );
-  }
-  const age = lastReceivedMs(output);
-  if (age === undefined) return false;
-  const arrived = now() - age;
-  return Math.abs(arrived - askedAt) <= KEYSTROKE_WINDOW_MS;
-}
-
-/** "laptop and desktop", for a refusal; an address stands in for a computer Tailscale cannot name. */
-async function namesOf(connections: string[], tailscale: TailscaleJson): Promise<string> {
-  const names = await Promise.all(
-    connections.map(async (connection) => {
-      const target = await identify(connection, tailscale).catch(() => undefined);
-      return target?.kind === "remote" ? target.host : connection.split(/\s+/)[0];
-    }),
-  );
-  return names.join(" and ");
-}
-
 /**
  * Whoever is attached to this pane's Herdr server and where from. Panes carry the server's
  * environment, not the typist's, so only the clients themselves can say: each is a process of this
- * user, a remote one with the SSH connection it came in on, a local one with none.
+ * user, a remote one with the SSH connection it came in on, a local one with none. One computer
+ * attached is the answer; several are a refusal, because none of them is known to be typing.
  */
 async function resolveInHerdr(
   env: NodeJS.ProcessEnv,
@@ -187,8 +137,6 @@ async function resolveInHerdr(
   }
   const ss = deps.ss ?? runSs;
   const connectionOf = deps.sshConnectionOf ?? sshConnectionOf;
-  const now = deps.now ?? Date.now;
-  const askedAt = deps.askedAt ?? now();
   const apiSocket = env.HERDR_SOCKET_PATH ?? "";
 
   let sockets: string;
@@ -227,28 +175,41 @@ async function resolveInHerdr(
   const local = clients.some((client) => client.connection === undefined);
   const remotes = [...new Set(clients.flatMap((client) => client.connection ?? []))];
   if (remotes.length === 0) return LOCAL;
-  const only = remotes[0];
-  if (remotes.length === 1 && !local && only !== undefined) return identify(only, tailscale);
+  const sole = remotes[0];
+  if (remotes.length === 1 && !local && sole !== undefined) return identify(sole, tailscale);
 
-  // Several computers are attached; whoever's keystroke just arrived asked for /live.
-  const typed = await Promise.all(
-    remotes.map((connection) => justSentData(connection, ss, askedAt, now)),
+  // More than one computer may be attached. Nothing here says which of them is typing: how
+  // recently a client sent data cannot tell a keystroke from a keepalive, and a local client sends
+  // nothing a remote one lacks. Only if they all turn out to be one computer is there an answer.
+  const origins = new Map<string, { name: string; target?: MediaTarget }>();
+  if (local) origins.set("local", { name: "this computer", target: LOCAL });
+  const identified = await Promise.all(
+    remotes.map((connection) => identify(connection, tailscale).catch(() => undefined)),
   );
-  const fresh = remotes.filter((_, index) => typed[index]);
-  const [one] = fresh;
-  if (fresh.length === 1 && one !== undefined) return identify(one, tailscale);
-  if (fresh.length === 0 && local) return LOCAL;
-  const names = await namesOf(remotes, tailscale);
+  remotes.forEach((connection, index) => {
+    const target = identified[index];
+    if (target === undefined) {
+      const address = connection.split(/\s+/)[0] ?? connection;
+      origins.set(connection, { name: address });
+    } else if (target.kind === "local") {
+      origins.set("local", { name: "this computer", target });
+    } else {
+      origins.set(target.node, { name: target.host, target });
+    }
+  });
+  const [origin] = origins.values();
+  if (origins.size === 1 && origin?.target) return origin.target;
+  const names = [...origins.values()].map((candidate) => candidate.name);
   throw new OriginError(
-    `${names} are attached to this Herdr and Pi could not tell which one you are typing from. ${SET_AUDIO_HOST}`,
+    `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are attached to this Herdr, and nothing tells Pi which of them you are typing from. ${SET_AUDIO_HOST}`,
   );
 }
 
 /**
  * Finds the audio computer for `live.audioHost: "auto"`: the computer the user is connected from.
- * Inside Herdr that is the Herdr client that just typed; otherwise Pi's own SSH connection. Every
- * doubt is a refusal with a reason, never a guess that opens this computer's microphone for
- * someone typing from elsewhere.
+ * Inside Herdr that is the one computer attached to the pane's server; otherwise Pi's own SSH
+ * connection. Every doubt is a refusal with a reason, never a guess that opens a microphone
+ * nobody chose.
  */
 export async function resolveMediaTarget(deps: OriginDependencies = {}): Promise<MediaTarget> {
   const env = deps.env ?? process.env;
