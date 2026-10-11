@@ -249,6 +249,8 @@ describe("Herdr transport", () => {
     const path = join(dir, "herdr.sock");
     const requests: Array<{ method: string; params: unknown }> = [];
     const server = createServer((socket) => {
+      // The client hangs up as soon as it has what it needs, which can reset this side.
+      socket.on("error", () => undefined);
       socket.once("data", (chunk) => {
         const request = JSON.parse(chunk.toString());
         requests.push(request);
