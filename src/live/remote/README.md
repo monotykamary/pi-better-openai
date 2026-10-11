@@ -24,13 +24,14 @@ for credentials, attestation or audio, and unknown fields are rejected.
 
 ## Which audio computer
 
-| Condition                                                                         | `/live` uses                                          |
-| --------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `live.audioHost` is set                                                           | that SSH host, whatever else is true                  |
-| Herdr reports `pane_last_input` and a local client typed in the pane              | this computer                                         |
-| ... and an SSH client typed, identified on the tailnet as another Linux computer  | that computer, over SSH                               |
-| ... and the client disconnected, nothing was typed, or it cannot be identified    | **refuses**, with the reason (never a guessed device) |
-| Anything else: no Herdr, Herdr without `pane_last_input` or unreachable, SSH vars | this computer, exactly as before this feature         |
+| Condition                                                                        | `/live` uses                                          |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `live.audioHost` is set                                                          | that SSH host, whatever else is true                  |
+| Herdr reports `pane_last_input` and a local client typed in the pane             | this computer                                         |
+| ... and an SSH client typed, identified on the tailnet as another Linux computer | that computer, over SSH                               |
+| ... and the client disconnected, nothing was typed, or it cannot be identified   | **refuses**, with the reason (never a guessed device) |
+| Herdr is in the environment but fails to answer (not a missing capability)       | **refuses**, with the reason                          |
+| Anything else: no Herdr, Herdr answers without `pane_last_input`, SSH variables  | this computer, exactly as before this feature         |
 
 The choice is made every time a session starts, including a queued one. Setting `audioHost` wins
 even over a Herdr that says the user is local: the setting is an explicit choice and the simplest

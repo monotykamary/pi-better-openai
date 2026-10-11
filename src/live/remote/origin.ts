@@ -206,20 +206,25 @@ async function identify(connection: string, tailscale: TailscaleJson): Promise<M
 
 /**
  * Finds the audio computer from what Herdr knows about who typed in this pane, for a Herdr build
- * that reports it (`pane_last_input`). Without that, or outside Herdr, nothing is known and /live
- * stays on this computer, as it always was. Once Herdr does report it, every doubt is a refusal
- * with a reason, never a guess: a remote user's /live must not open this computer's microphone.
+ * that reports it (`pane_last_input`). Outside Herdr, or when Herdr answers that it does not report
+ * it, nothing is known and /live stays on this computer, as it always was. Every other doubt,
+ * including a Herdr that fails to answer, is a refusal with a reason, never a guess: a remote
+ * user's /live must not open this computer's microphone.
  */
 export async function resolveMediaTarget(deps: OriginDependencies = {}): Promise<MediaTarget> {
   const env = deps.env ?? process.env;
   const pane = env.HERDR_PANE_ID;
   if (!env.HERDR_SOCKET_PATH || !pane) return LOCAL;
   const herdr = deps.herdr ?? createHerdrClient({ env });
+  let capabilities: Json;
   try {
-    if ((await herdr.capabilities()).pane_last_input !== true) return LOCAL;
-  } catch {
-    return LOCAL; // A Herdr that cannot be asked cannot say who typed either.
+    capabilities = await herdr.capabilities();
+  } catch (cause) {
+    throw new OriginError(
+      `Could not reach Herdr to find the computer you are typing from (${messageOf(cause)}).`,
+    );
   }
+  if (capabilities.pane_last_input !== true) return LOCAL;
   let input: unknown;
   try {
     input = await herdr.lastInput(pane);
