@@ -243,6 +243,8 @@ Choose the spoken voice under **Live voice** in `/openai-settings`. Supported va
 
 Live mode requires interactive TUI mode, microphone/speaker access, `openai-codex` OAuth, and one of these native targets: macOS arm64/x64, Linux arm64/x64, or Windows x64. Standard `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` settings are honored for signaling and sideband traffic. Audio/WebRTC uses the MIT-licensed native platform packages from [`can1357/oh-my-pi`](https://github.com/can1357/oh-my-pi). The adapted implementation is attributed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). On macOS, launchd-managed LocalTerm users should rerun `localterm install` after upgrading LocalTerm and allow its microphone prompt.
 
+Inside Herdr, `/live` can use the microphone and speakers of the Linux computer you are typing from instead of the one running Pi. This is experimental and has had little real-device testing; see [`src/live/remote/README.md`](src/live/remote/README.md) for what it needs and how it chooses.
+
 The feature uses Codex Desktop's experimental `gpt-live-1-codex`/Quicksilver protocol rather than the public OpenAI Realtime API. Upstream protocol or entitlement changes may temporarily break it.
 
 ## Image generation
