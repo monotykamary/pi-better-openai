@@ -1,5 +1,5 @@
 import type { CodexCredentials } from "../codex-auth.ts";
-import { OUTPUT_ACTIVE_LEVEL } from "./media.ts";
+import { type LiveMediaFactory, OUTPUT_ACTIVE_LEVEL } from "./media.ts";
 import { loadLiveNative, type LiveNativeBindings } from "./native.ts";
 import {
   buildDelegationContextAppend,
@@ -60,6 +60,11 @@ export interface LiveSessionControllerOptions {
   signal?: AbortSignal;
   native?: LiveNativeBindings;
   createTransport?: (options: LiveTransportOptions) => LiveTransport;
+  /**
+   * Chooses where the media of this session lives, each time it starts. Undefined keeps the
+   * default, this computer; a refusal fails the start before anything is opened.
+   */
+  resolveMedia?(signal?: AbortSignal): Promise<LiveMediaFactory | undefined>;
 }
 
 type AssistantSnapshot = {
@@ -150,6 +155,13 @@ export class LiveSessionController {
     this.#emitTranscript(undefined);
 
     try {
+      // Awaited only when there is something to wait for, so the default path keeps its timing.
+      const createMedia = this.#options.resolveMedia
+        ? await this.#options.resolveMedia(this.#options.signal)
+        : undefined;
+      if (this.#stopped) {
+        throw this.#failure ?? new Error("The live session stopped while connecting.");
+      }
       const native = this.#native ?? loadLiveNative();
       this.#native = native;
       const transport = this.#createTransport({
@@ -159,6 +171,7 @@ export class LiveSessionController {
         voice: this.#voice,
         signal: this.#options.signal,
         native,
+        ...(createMedia ? { createMedia } : {}),
         callbacks: {
           onEvent: (event) => this.#guardEvent(() => this.#handleLiveEvent(event)),
           onLevels: (input, output) => this.#guardEvent(() => this.#handleLevels(input, output)),

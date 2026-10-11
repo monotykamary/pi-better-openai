@@ -10,7 +10,7 @@ const HERDR_TIMEOUT_MS = 3_000;
 const MAX_HERDR_RESPONSE_BYTES = 1_048_576;
 const SSH_MARKERS = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] as const;
 // A MagicDNS machine name. Anything else could be read by ssh as an option.
-const HOST_LABEL = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
+export const HOST_LABEL = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 
 /** Why /live will not pick a microphone; shown to the user as is. */
 export class OriginError extends Error {
