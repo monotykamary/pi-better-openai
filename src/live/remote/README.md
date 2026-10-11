@@ -67,8 +67,15 @@ Outside Herdr nothing depends on the operating system: Pi's own `SSH_CONNECTION`
    made itself non-dumpable) is a client too, just not placed, so it refuses the same way; one
    that already hung up (peer inode 0) is not a client.
    A client whose `/proc` cannot be read (`EACCES`) goes to the process list (below), which
-   answers this computer only if it shows no remote Herdr client and shows that client itself; next
-   to a client already known to be remote it refuses.
+   answers this computer only if it shows no remote Herdr client **and** shows each unread client
+   as a local `herdr`: the `herdr` program with a readable command line, not `herdr server`, not
+   the bridge command, not started by sshd. Being in the list is not enough (an unrecognized
+   `tunnel-v2 --stdio` under sshd is in it too); next to a client already known to be remote it
+   refuses outright.
+   A server whose owner `ss` cannot show (it made itself non-dumpable, so its sockets have no
+   `users:`) is not an absent server: its clients cannot be told either, so it takes the same
+   process-list route as a computer without `ss`, with that route's limits (below). Nothing
+   listening on the socket path at all still refuses.
 3. One origin: it is that computer (`identify`: `tailscale whois`, same Tailscale user, Linux, a
    machine name safe for `ssh`; its media host must announce the same node ID in its `hello`).
 4. Several origins (this computer's own client plus a remote one, or two remote computers):
