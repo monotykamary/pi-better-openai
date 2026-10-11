@@ -81,19 +81,27 @@ posix("launcher", () => {
     expect(JSON.parse(out)).toEqual(["one", "two words"]);
   });
 
-  test("a personal install keeps it fresh; a checkout, project copy or -e path never does", () => {
+  test.each([
+    ["npm", ["npm", "node_modules", "@monotykamary", "pi-better-openai"]],
+    ["git", ["git", "github.com", "monotykamary", "pi-better-openai"]],
+  ])("a personal %s install keeps it fresh", (_kind, parts) => {
     const agentDir = temp();
-    const personal = join(agentDir, "npm", "node_modules", "@monotykamary", "pi-better-openai");
-    const entry = join(personal, "src", "live", "remote", "media-host.mjs");
+    const entry = join(agentDir, ...parts, "src", "live", "remote", "media-host.mjs");
     mkdirSync(join(entry, ".."), { recursive: true });
     writeFileSync(entry, "");
     expect(registerPersonalLauncher({ agentDir, entry, nodePath: "/n" })?.changed).toBe(true);
     expect(existsSync(launcherPath(agentDir))).toBe(true);
+  });
 
-    for (const elsewhere of [temp(), join(temp(), ".pi", "npm", "node_modules", "pkg")]) {
+  test("a checkout, project copy or -e path never writes it", () => {
+    for (const parts of [
+      [],
+      [".pi", "npm", "node_modules", "pkg"],
+      [".pi", "git", "github.com", "o", "r"],
+    ]) {
       const other = temp();
-      const outside = join(elsewhere, "media-host.mjs");
-      mkdirSync(elsewhere, { recursive: true });
+      const outside = join(temp(), ...parts, "media-host.mjs");
+      mkdirSync(join(outside, ".."), { recursive: true });
       writeFileSync(outside, "");
       expect(
         registerPersonalLauncher({ agentDir: other, entry: outside, nodePath: "/n" }),
@@ -102,15 +110,21 @@ posix("launcher", () => {
     }
   });
 
-  test("a symlink out of the personal install is judged by where it really points", () => {
-    const agentDir = temp();
-    const checkout = temp();
-    writeFileSync(join(checkout, "media-host.mjs"), "");
-    mkdirSync(join(agentDir, "npm", "node_modules"), { recursive: true });
-    symlinkSync(checkout, join(agentDir, "npm", "node_modules", "pkg"), "dir");
-    const entry = join(agentDir, "npm", "node_modules", "pkg", "media-host.mjs");
-    expect(registerPersonalLauncher({ agentDir, entry, nodePath: "/n" })).toBeUndefined();
-  });
+  test.each([
+    ["npm", ["npm", "node_modules"]],
+    ["git", ["git", "github.com", "monotykamary"]],
+  ])(
+    "a symlink out of the personal %s install is judged by where it really points",
+    (_kind, parts) => {
+      const agentDir = temp();
+      const checkout = temp();
+      writeFileSync(join(checkout, "media-host.mjs"), "");
+      mkdirSync(join(agentDir, ...parts), { recursive: true });
+      symlinkSync(checkout, join(agentDir, ...parts, "pkg"), "dir");
+      const entry = join(agentDir, ...parts, "pkg", "media-host.mjs");
+      expect(registerPersonalLauncher({ agentDir, entry, nodePath: "/n" })).toBeUndefined();
+    },
+  );
 
   test("nothing is registered on Windows yet", () => {
     const agentDir = temp();
@@ -144,27 +158,68 @@ describe("XDG_RUNTIME_DIR", () => {
   });
 });
 
-posix("host lock", () => {
+describe.skipIf(process.platform !== "linux")("host lock", () => {
+  const name = () => join(temp(), "lock");
+
   test("a second host gets busy until the first lets go", async () => {
-    const path = join(temp(), "lock.sock");
-    const first = await acquireHostLock(path);
-    await expect(acquireHostLock(path)).rejects.toBeInstanceOf(HostBusyError);
-    await expect(acquireHostLock(path)).rejects.toThrow("already using");
+    const lock = name();
+    const first = await acquireHostLock(lock);
+    await expect(acquireHostLock(lock)).rejects.toBeInstanceOf(HostBusyError);
+    await expect(acquireHostLock(lock)).rejects.toThrow("already using");
     first.close();
-    const second = await acquireHostLock(path);
+    const second = await acquireHostLock(lock);
     second.close();
   });
 
-  test("a lock left behind by a host that was killed is taken over", async () => {
-    const path = join(temp(), "lock.sock");
+  test("the lock is held by the kernel: nothing is left on disk to go stale", async () => {
+    const lock = name();
+    const first = await acquireHostLock(lock);
+    expect(existsSync(lock)).toBe(false);
+    first.close();
+  });
+
+  test("a host that was killed frees the lock", async () => {
+    const lock = name();
     const child = spawn(process.execPath, [
       "-e",
-      `require("node:net").createServer().listen(${JSON.stringify(path)}, () => console.log("up"))`,
+      `require("node:net").createServer().listen("\0" + ${JSON.stringify(lock)}, () => console.log("up"))`,
     ]);
     await new Promise<void>((resolve) => child.stdout.once("data", () => resolve()));
+    await expect(acquireHostLock(lock)).rejects.toBeInstanceOf(HostBusyError);
     child.kill("SIGKILL");
     await new Promise((resolve) => child.once("exit", resolve));
-    expect(existsSync(path)).toBe(true);
-    (await acquireHostLock(path)).close();
+    (await acquireHostLock(lock)).close();
   });
+
+  test("starting together after a crash admits exactly one host", async () => {
+    const lock = name();
+    // What an earlier version left behind after a crash: a socket file nobody listens on.
+    const stale = spawn(process.execPath, [
+      "-e",
+      `require("node:net").createServer().listen(${JSON.stringify(lock)}, () => console.log("up"))`,
+    ]);
+    await new Promise<void>((resolve) => stale.stdout.once("data", () => resolve()));
+    stale.kill("SIGKILL");
+    await new Promise((resolve) => stale.once("exit", resolve));
+    expect(existsSync(lock)).toBe(true);
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 8 }, () => acquireHostLock(lock)),
+    );
+    const held = results.filter((result) => result.status === "fulfilled");
+    expect(held).toHaveLength(1);
+    for (const result of results) {
+      if (result.status === "rejected") expect(result.reason).toBeInstanceOf(HostBusyError);
+    }
+    for (const result of held) result.value.close();
+    expect(existsSync(lock)).toBe(true);
+  });
+});
+
+test("only Linux can hold the lock yet, and says so rather than claiming busy", async () => {
+  for (const platform of ["darwin", "win32"] as const) {
+    const refusal = acquireHostLock("any", platform);
+    await expect(refusal).rejects.toThrow("cannot use this computer's microphone yet");
+    await expect(refusal).rejects.not.toBeInstanceOf(HostBusyError);
+  }
 });
