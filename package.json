@@ -51,8 +51,8 @@
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "lint": "oxlint --deny-warnings index.ts src/*.ts src/*/*.ts tests/*.ts",
-    "lint:fix": "oxlint --fix index.ts src/*.ts src/*/*.ts tests/*.ts",
+    "lint": "oxlint --deny-warnings index.ts src/*.ts src/*/*.ts src/*/*/*.ts src/*/*/*.mjs tests/*.ts",
+    "lint:fix": "oxlint --fix index.ts src/*.ts src/*/*.ts src/*/*/*.ts src/*/*/*.mjs tests/*.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:pi": "node scripts/test-pi-compat.mjs"
