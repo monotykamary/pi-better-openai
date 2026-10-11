@@ -69,7 +69,7 @@ posix("launcher", () => {
     const { path } = registerLauncher({ agentDir, nodePath: process.execPath, entry });
     // Run it the way the Pi host does: through a shell, from an unrelated directory and PATH.
     const out = await new Promise<string>((resolve, reject) => {
-      const child = spawn("sh", ["-c", `exec '${path}' one "two words"`], {
+      const child = spawn("/bin/sh", ["-c", `exec '${path}' one "two words"`], {
         cwd: tmpdir(),
         env: { PATH: "/nonexistent" },
       });
