@@ -211,3 +211,22 @@ describe("live media protocol validation", () => {
     expect(boundedMessage("short")).toBe("short");
   });
 });
+
+describe("host identity and lease frames", () => {
+  test("hello may carry the media host's node id, and nothing else", () => {
+    const hello = { type: "hello", node: "nABCDEF123CNTRL" } as const;
+    expect(new FrameDecoder(parseHostFrame).push(encodeFrame(hello))).toEqual([hello]);
+    for (const bad of [{ node: "" }, { node: 7 }, { node: "x".repeat(257) }, { token: "t" }]) {
+      expect(() => parseHostFrame(line({ v: 1, type: "hello", ...bad })), line(bad)).toThrow(
+        ProtocolError,
+      );
+    }
+  });
+
+  test("ping is a bare client frame", () => {
+    expect(new FrameDecoder(parseClientFrame).push(encodeFrame({ type: "ping" }))).toEqual([
+      { type: "ping" },
+    ]);
+    expect(() => parseClientFrame(line({ v: 1, type: "ping", extra: 1 }))).toThrow(ProtocolError);
+  });
+});

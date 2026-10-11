@@ -48,6 +48,8 @@ function startHost(
     createMedia?: ReturnType<typeof fakeMedia>["createMedia"];
     output?: Writable;
     closeTimeoutMs?: number;
+    nodeId?: string;
+    leaseMs?: number;
   } = {},
 ) {
   const input = new PassThrough();
@@ -66,6 +68,8 @@ function startHost(
     diagnostics,
     signal: abort.signal,
     closeTimeoutMs: options.closeTimeoutMs,
+    nodeId: options.nodeId,
+    leaseMs: options.leaseMs,
   });
   return {
     input,
@@ -91,6 +95,32 @@ describe("runCompanion (media host)", () => {
     expect(host.createMedia).not.toHaveBeenCalled();
     host.input.end();
     await expect(host.done).resolves.toBe(0);
+    expect(host.createMedia).not.toHaveBeenCalled();
+  });
+
+  test("says which computer it is when it knows", async () => {
+    const host = startHost({ nodeId: "nABC123" });
+    await vi.waitFor(() => expect(host.frames).toEqual([{ type: "hello", node: "nABC123" }]));
+    host.input.end();
+    await expect(host.done).resolves.toBe(0);
+  });
+
+  test("closes the media and ends when the Pi host goes silent, and pings keep it alive", async () => {
+    const host = startHost({ leaseMs: 120 });
+    await host.open();
+    for (let beat = 0; beat < 5; beat += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      host.send({ type: "ping" });
+    }
+    expect(host.fake.media.close).not.toHaveBeenCalled();
+    await expect(host.done).resolves.toBe(1);
+    expect(host.fake.media.close).toHaveBeenCalledOnce();
+    expect(host.diagnostics).toHaveBeenCalledWith(expect.stringContaining("silent"));
+  });
+
+  test("a host that never hears from the Pi host does not wait forever either", async () => {
+    const host = startHost({ leaseMs: 60 });
+    await expect(host.done).resolves.toBe(1);
     expect(host.createMedia).not.toHaveBeenCalled();
   });
 
@@ -302,12 +332,12 @@ class FakeProcess extends EventEmitter implements RemoteMediaProcess {
 
 const FAST = { handshakeMs: 200, requestMs: 200, closeMs: 100 };
 
-function clientSetup() {
+function clientSetup(extra: { expectedNode?: string; pingMs?: number } = {}) {
   const proc = new FakeProcess();
   const callbacks = { onEvent: vi.fn(), onLevels: vi.fn(), onFailure: vi.fn() };
   const spawn = vi.fn(() => proc);
   const abort = new AbortController();
-  const media = createRemoteMediaFactory(spawn, FAST)(callbacks, abort.signal);
+  const media = createRemoteMediaFactory(spawn, { ...FAST, ...extra })(callbacks, abort.signal);
   return { proc, callbacks, spawn, media, abort };
 }
 
@@ -352,6 +382,45 @@ describe("RemoteLiveMedia (client)", () => {
       "Update @monotykamary/pi-better-openai",
     );
     expect(proc.kill).toHaveBeenCalled();
+  });
+
+  test("asks the host to open only when its node id is the expected computer", async () => {
+    const { proc, media } = clientSetup({ expectedNode: "nTYPIST" });
+    const offer = media.createOffer();
+    offer.catch(() => undefined);
+    proc.host({ type: "hello", node: "nTYPIST" });
+    await vi.waitFor(() => expect(proc.written[0]).toMatchObject({ method: "open" }));
+  });
+
+  test.each([
+    ["another computer", { type: "hello", node: "nSOMEONE" } as HostFrame],
+    ["a host that cannot say who it is", { type: "hello" } as HostFrame],
+  ])("never opens devices on %s", async (_name, hello) => {
+    const { proc, callbacks, media } = clientSetup({ expectedNode: "nTYPIST" });
+    const offer = media.createOffer();
+    proc.host(hello);
+    await expect(offer).rejects.toThrow("not the computer");
+    expect(proc.written).toEqual([]);
+    expect(callbacks.onFailure).toHaveBeenCalledOnce();
+    expect(JSON.stringify(callbacks.onFailure.mock.calls)).not.toContain("nSOMEONE");
+    expect(proc.kill).toHaveBeenCalled();
+  });
+
+  test("pings the host while the session lives and stops when it closes", async () => {
+    const { proc, media } = clientSetup({ pingMs: 20 });
+    void media.createOffer().catch(() => undefined);
+    acceptOpen(proc);
+    await vi.waitFor(() =>
+      expect(proc.written.filter((frame) => frame.type === "ping").length).toBeGreaterThanOrEqual(
+        2,
+      ),
+    );
+    const closing = media.close();
+    proc.exit(0);
+    await closing;
+    const sent = proc.written.length;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(proc.written).toHaveLength(sent);
   });
 
   test("fails closed on garbage or a frame before hello", async () => {
