@@ -2,7 +2,12 @@ import { spawn as nodeSpawn } from "node:child_process";
 import type { LiveMediaFactory } from "../media.ts";
 import { createRemoteMediaFactory, type RemoteMediaProcess } from "./client.ts";
 import { HOST_LAUNCHER_COMMAND } from "./host.ts";
-import { type MediaTarget, OriginError, resolveMediaTarget } from "./origin.ts";
+import {
+  type ChooseComputer,
+  type MediaTarget,
+  OriginError,
+  resolveMediaTarget,
+} from "./origin.ts";
 
 // A host name, an ssh config alias, an address, or user@host. Anything that could start with a
 // dash, or carry a space or shell syntax, could be read by ssh as an option or a command.
@@ -17,7 +22,9 @@ type SpawnSsh = (
 export interface RouteDependencies {
   /** `live.audioHost`: unset is this computer, `auto` the computer connected from, else an SSH host. */
   audioHost?: string;
-  resolveTarget?: () => Promise<MediaTarget>;
+  /** Finds the computer for `auto`; given the way to ask the user when several are attached. */
+  resolveTarget?: (choose?: ChooseComputer) => Promise<MediaTarget>;
+  choose?: ChooseComputer;
   spawn?: SpawnSsh;
 }
 
@@ -51,6 +58,16 @@ export function sshArguments(host: string): string[] {
 }
 
 /**
+ * The computer `auto` finds, or undefined for any other setting. Asked once, when /live is asked
+ * and someone is there to answer: the result is what every start of that run (including one that
+ * waited for the floor) uses, so a queued start never asks at a later, odd moment.
+ */
+export async function resolveLiveTarget(deps: RouteDependencies): Promise<MediaTarget | undefined> {
+  if (deps.audioHost?.trim() !== "auto") return undefined;
+  return (deps.resolveTarget ?? ((choose) => resolveMediaTarget({ choose })))(deps.choose);
+}
+
+/**
  * Where the media of a new live session lives. Undefined means this computer, the default path;
  * a remote computer returns a factory that starts its media host over SSH. Only `auto` looks
  * anything up; a host named in the settings is trusted to be the computer meant, so only its hello
@@ -63,9 +80,9 @@ export async function resolveLiveMedia(
   if (!setting) return undefined;
   const target =
     setting === "auto"
-      ? await (deps.resolveTarget ?? resolveMediaTarget)()
+      ? await resolveLiveTarget(deps)
       : { kind: "remote" as const, host: setting, node: undefined };
-  if (target.kind === "local") return undefined;
+  if (!target || target.kind === "local") return undefined;
   const args = sshArguments(target.host);
   const spawn: SpawnSsh =
     deps.spawn ?? ((command, argv, options) => nodeSpawn(command, argv, options));

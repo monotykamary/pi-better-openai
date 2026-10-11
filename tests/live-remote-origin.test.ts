@@ -594,7 +594,7 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
 
     test.each([
       ["a Mac", "100.96.150.42", /100\.96\.150\.42: .*macOS/],
-      ["a Windows PC", "100.96.150.43", /100\.96\.150\.43: .*Windows/],
+      ["a Windows PC", "100.96.150.43", /100\.96\.150\.43: .*windows/i],
       [
         "another Tailscale user's computer",
         "100.96.150.44",
@@ -638,13 +638,13 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
         (labels) => labels[0],
       );
       await expect(result).rejects.toThrow(/macOS/);
-      await expect(result).rejects.toThrow(/Windows/);
+      await expect(result).rejects.toThrow(/windows/i);
       await expect(result).rejects.toThrow(/live\.audioHost/);
       expect(choose).not.toHaveBeenCalled();
     });
 
     test("is never asked when one computer is the answer", async () => {
-      for (const w of [
+      const attached: World[] = [
         { unix: unixSockets([200]), connections: { 200: FROM_LAPTOP } },
         { unix: unixSockets([300]) },
         {
@@ -652,7 +652,8 @@ describe("inside Herdr, the computer attached to this pane's server", () => {
           connections: { 200: FROM_LAPTOP, 201: from("100.96.150.40") },
         },
         { unix: unixSockets([200, 300]), connections: { 200: from("100.96.150.45") } },
-      ]) {
+      ];
+      for (const w of attached) {
         const { choose, result } = ask(w, (labels) => labels[0]);
         await result;
         expect(choose).not.toHaveBeenCalled();

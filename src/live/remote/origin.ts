@@ -1,6 +1,7 @@
 // The Tailscale lookup of an SSH connection is adapted from herdr-codex-voice's client_origin.py
 // (MIT, see THIRD_PARTY_NOTICES.md).
 import { isIP } from "node:net";
+import { hostname } from "node:os";
 import {
   type ProcessInfo,
   hasTerminal,
@@ -29,6 +30,20 @@ export class OriginError extends Error {
   }
 }
 
+/** The user closed the question of which computer to use; nothing was started. */
+export class OriginCancelled extends OriginError {
+  constructor() {
+    super("No computer was chosen, so live voice did not start.");
+    this.name = "OriginCancelled";
+  }
+}
+
+/**
+ * Asks the user which of the offered computers they are at; undefined if they decline. `notes`
+ * are computers that are attached but cannot be offered, and why.
+ */
+export type ChooseComputer = (labels: string[], notes: string[]) => Promise<string | undefined>;
+
 export type MediaTarget =
   | { kind: "local" }
   | {
@@ -49,6 +64,8 @@ export interface OriginDependencies {
   sshConnectionOf?: (pid: number) => Promise<string | undefined>;
   isTerminal?: (pid: number) => Promise<boolean>;
   processes?: () => Promise<ProcessInfo[]>;
+  /** Present where someone can answer. Without it, several attached computers are a refusal. */
+  choose?: ChooseComputer;
 }
 
 type Json = Record<string, unknown>;
@@ -186,7 +203,7 @@ async function resolveFromProcesses(
  * Whoever is attached to this pane's Herdr server and where from. Panes carry the server's
  * environment, not the typist's, so only the clients themselves can say: each is a process of this
  * user, a remote one with the SSH connection it came in on, a local one with none. One computer
- * attached is the answer; several are a refusal, because none of them is known to be typing.
+ * attached is the answer; several are put to the user, because none of them is known to be typing.
  */
 async function resolveInHerdr(
   env: NodeJS.ProcessEnv,
@@ -277,31 +294,61 @@ async function resolveInHerdr(
   const sole = remotes[0];
   if (remotes.length === 1 && !local && sole !== undefined) return identify(sole, tailscale);
 
-  // More than one computer may be attached. Nothing here says which of them is typing: how
+  // More than one computer may be attached, and nothing here says which of them is typing: how
   // recently a client sent data cannot tell a keystroke from a keepalive, and a local client sends
-  // nothing a remote one lacks. Only if they all turn out to be one computer is there an answer.
-  const origins = new Map<string, { name: string; target?: MediaTarget }>();
+  // nothing a remote one lacks. Only if they all turn out to be one computer is there an answer;
+  // otherwise the person at the keyboard is asked, and where nobody can be asked it is a refusal.
+  const origins = new Map<string, { name: string; target?: MediaTarget; reason?: string }>();
   if (local) origins.set("local", { name: "this computer", target: LOCAL });
-  const identified = await Promise.all(
-    remotes.map((connection) => identify(connection, tailscale).catch(() => undefined)),
+  const identified = await Promise.allSettled(
+    remotes.map((connection) => identify(connection, tailscale)),
   );
   remotes.forEach((connection, index) => {
-    const target = identified[index];
-    if (target === undefined) {
+    const outcome = identified[index];
+    if (outcome?.status !== "fulfilled") {
       const address = connection.split(/\s+/)[0] ?? connection;
-      origins.set(connection, { name: address });
-    } else if (target.kind === "local") {
-      origins.set("local", { name: "this computer", target });
+      origins.set(connection, { name: address, reason: messageOf(outcome?.reason) });
+    } else if (outcome.value.kind === "local") {
+      origins.set("local", { name: "this computer", target: outcome.value });
     } else {
-      origins.set(target.node, { name: target.host, target });
+      origins.set(outcome.value.node, { name: outcome.value.host, target: outcome.value });
     }
   });
-  const [origin] = origins.values();
-  if (origins.size === 1 && origin?.target) return origin.target;
-  const names = [...origins.values()].map((candidate) => candidate.name);
-  throw new OriginError(
-    `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are attached to this Herdr, and nothing tells Pi which of them you are typing from. ${SET_AUDIO_HOST}`,
+  const attachedHere = [...origins.values()];
+  const [origin] = attachedHere;
+  if (attachedHere.length === 1 && origin?.target) return origin.target;
+
+  const names = attachedHere.map((candidate) => candidate.name);
+  const refusal = () =>
+    new OriginError(
+      `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are attached to this Herdr, and nothing tells Pi which of them you are typing from. ${SET_AUDIO_HOST}`,
+    );
+  if (!deps.choose) throw refusal();
+  // A computer that cannot be the audio computer (unidentified, another user's, not Linux) is not
+  // offered, but it may be the one typing, so the rest are still asked rather than assumed.
+  const offered = attachedHere
+    .filter((candidate) => candidate.target)
+    .map((candidate) => ({
+      ...candidate,
+      label:
+        candidate.target?.kind === "local"
+          ? `this computer (${hostname().split(".")[0]})`
+          : candidate.name,
+    }))
+    .sort((a, b) => Number(a.target?.kind === "local") - Number(b.target?.kind === "local"));
+  const notes = attachedHere.flatMap((candidate) =>
+    candidate.target ? [] : [`${candidate.name}: ${candidate.reason}`],
   );
+  if (offered.length === 0) {
+    throw new OriginError(
+      `None of the computers attached to this Herdr can be the audio computer (${notes.join(" ")}) ${SET_AUDIO_HOST}`,
+    );
+  }
+  const labels = offered.map((candidate) => candidate.label);
+  const answer = await deps.choose(labels, notes);
+  const chosen = answer === undefined ? undefined : offered[labels.indexOf(answer)];
+  if (!chosen?.target) throw new OriginCancelled();
+  return chosen.target;
 }
 
 /**
