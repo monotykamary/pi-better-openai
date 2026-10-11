@@ -188,17 +188,23 @@ describe("LocalLiveMedia", () => {
     expect(harness.callbacks.onFailure).not.toHaveBeenCalled();
   });
 
-  test("reports capture errors and peer push failures as failures", () => {
+  test("reports capture errors as failures", () => {
     const harness = setup();
     harness.create().activate();
     harness.micError(new Error("device lost"));
-    expect(harness.callbacks.onFailure).toHaveBeenLastCalledWith("device lost");
+    expect(harness.callbacks.onFailure).toHaveBeenCalledExactlyOnceWith("device lost");
+  });
 
+  test("reports a peer that rejects audio as a failure and stops forwarding", () => {
+    const harness = setup();
+    harness.create().activate();
     harness.peer.pushAudio.mockImplementationOnce(() => {
       throw new Error("encoder stopped");
     });
     harness.mic(LOUD);
-    expect(harness.callbacks.onFailure).toHaveBeenLastCalledWith("encoder stopped");
+    harness.mic(LOUD);
+    expect(harness.callbacks.onFailure).toHaveBeenCalledExactlyOnceWith("encoder stopped");
+    expect(harness.peer.pushAudio).toHaveBeenCalledOnce();
   });
 
   test("forwards peer events and failures", () => {

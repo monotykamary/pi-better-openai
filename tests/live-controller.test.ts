@@ -134,7 +134,7 @@ describe("LiveSessionController", () => {
   });
 
   test("owns no capture: the transport alone is created and connected on start", async () => {
-    const createTransport = vi.fn(() => ({
+    const createTransport = vi.fn((_options: LiveTransportOptions) => ({
       connect: vi.fn(async () => undefined),
       send: vi.fn(async () => undefined),
       setMuted: vi.fn(),

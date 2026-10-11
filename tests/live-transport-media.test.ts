@@ -112,7 +112,7 @@ describe("CodexLiveTransport media seam", () => {
 
     const connecting = transport.connect();
     expect(media.createMedia).toHaveBeenCalledOnce();
-    expect(media.calls).toEqual([["create"], ["setMuted", false]]);
+    expect(media.calls).toEqual([["create"], ["setMuted", false], ["createOffer"]]);
     expect(media.signal()).toBeInstanceOf(AbortSignal);
 
     await connecting;
