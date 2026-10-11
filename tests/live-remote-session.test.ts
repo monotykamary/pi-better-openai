@@ -218,15 +218,16 @@ describe("runCompanion (media host)", () => {
   });
 
   test("closes the media and ends on a close frame, EOF, abort or a broken output", async () => {
-    for (const trigger of ["close", "eof", "abort", "output-error"] as const) {
+    for (const trigger of ["close", "eof", "abort", "output-error", "output-closed"] as const) {
       const host = startHost();
       await host.open();
       if (trigger === "close") host.send({ type: "close" });
       else if (trigger === "eof") host.input.end();
       else if (trigger === "abort") host.abort.abort();
-      else host.output.emit("error", new Error("EPIPE"));
+      else if (trigger === "output-error") host.output.emit("error", new Error("EPIPE"));
+      else host.output.destroy();
       const code = await host.done;
-      expect(code, trigger).toBe(trigger === "output-error" ? 1 : 0);
+      expect(code, trigger).toBe(trigger.startsWith("output") ? 1 : 0);
       expect(host.fake.media.close, trigger).toHaveBeenCalledOnce();
       expect(host.fake.calls.at(-1), trigger).toEqual(["close"]);
       host.fake.callbacks().onEvent("{}");
@@ -277,8 +278,9 @@ class FakeProcess extends EventEmitter implements RemoteMediaProcess {
   readonly stdin = new PassThrough();
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
-  readonly kill = vi.fn(() => {
-    queueMicrotask(() => this.exit(null, "SIGTERM"));
+  pid: number | undefined;
+  readonly kill = vi.fn((signal?: NodeJS.Signals) => {
+    queueMicrotask(() => this.exit(null, signal ?? "SIGTERM"));
     return true;
   });
   readonly written: ClientFrame[] = [];
@@ -467,6 +469,76 @@ describe("RemoteLiveMedia (client)", () => {
     await vi.waitFor(() => expect(aborted.proc.stdin.writableEnded).toBe(true));
     expect(aborted.proc.written).toEqual([{ type: "close" }]);
     await aborted.media.close();
+  });
+
+  test("the host closing its output ends the session even with nothing pending", async () => {
+    const { proc, callbacks, media } = clientSetup();
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    media.activate();
+    await vi.waitFor(() => expect(proc.written).toHaveLength(2));
+    proc.stdout.end();
+    await vi.waitFor(() => expect(callbacks.onFailure).toHaveBeenCalledOnce());
+    expect(callbacks.onFailure.mock.calls[0]?.[0]).toContain("closed its output");
+    expect(proc.stdin.writableEnded).toBe(true);
+    expect(proc.kill).toHaveBeenCalled();
+    await expect(media.createOffer()).rejects.toThrow();
+  });
+
+  test("close escalates to SIGKILL when the host ignores SIGTERM, and waits for the exit", async () => {
+    const { proc, media } = clientSetup();
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    proc.kill.mockImplementation((signal) => {
+      if (signal === "SIGKILL") queueMicrotask(() => proc.exit(null, "SIGKILL"));
+      return true;
+    });
+    await media.close();
+    expect(proc.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  test("close rejects, rather than succeeding, when the host cannot be made to exit", async () => {
+    const { proc, media } = clientSetup();
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    proc.kill.mockImplementation(() => true);
+    await expect(media.close()).rejects.toThrow("did not exit");
+    expect(proc.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
+    await expect(media.close()).rejects.toThrow("did not exit");
+  });
+
+  test("a failure escalates to SIGKILL too, and close then reports the exit", async () => {
+    const { proc, callbacks, media } = clientSetup();
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    proc.kill.mockImplementation((signal) => {
+      if (signal === "SIGKILL") queueMicrotask(() => proc.exit(null, "SIGKILL"));
+      return true;
+    });
+    proc.stdout.write("this is not a protocol frame\n");
+    await vi.waitFor(() => expect(callbacks.onFailure).toHaveBeenCalledOnce());
+    await media.close();
+    expect(proc.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  test("an error event on a running host is not mistaken for its exit", async () => {
+    const { proc, media } = clientSetup();
+    proc.pid = 4242;
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    proc.kill.mockImplementation(() => true);
+    proc.emit("error", new Error("kill EPERM"));
+    await expect(media.close()).rejects.toThrow("did not exit");
+  });
+
+  test("aborting while the host will not exit leaves no unhandled rejection", async () => {
+    const { proc, abort } = clientSetup();
+    acceptOpen(proc);
+    await vi.waitFor(() => expect(proc.written).toHaveLength(1));
+    proc.kill.mockImplementation(() => true);
+    abort.abort();
+    await vi.waitFor(() => expect(proc.kill).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   });
 
   test("a spawn that throws surfaces from the factory", () => {
