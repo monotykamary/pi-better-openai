@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { UsageConfig } from "./config.ts";
 import { getCodexCredentials } from "./codex-auth.ts";
 export { AUTH_FILE, readCodexAuth } from "./codex-auth.ts";
 
@@ -119,15 +120,16 @@ function formatResetClock(
   return `${weekday} ${date} ${time}`;
 }
 
-function formatCompactReset(
-  label: string | undefined,
+function formatReset(
   seconds: number | null,
-  options?: { includeDate?: boolean },
+  options?: { includeDate?: boolean; resetFormat?: UsageConfig["resetFormat"] },
   now = Date.now(),
 ): string | null {
+  if (options?.resetFormat === "countdown") return formatResetCountdown(seconds);
+  if (options?.resetFormat === "clock") return formatResetClock(seconds, options, now);
   const countdown = formatResetCountdown(seconds);
   const clock = formatResetClock(seconds, options, now);
-  return countdown && clock ? `${label ? `${label} ` : ""}↺ ${countdown} - ${clock}` : null;
+  return countdown && clock ? `${countdown} - ${clock}` : null;
 }
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -271,9 +273,16 @@ export function severityForLeftPercent(percent: number | null): UsageSeverity {
   return "ok";
 }
 
+export type UsageDisplayOptions = Pick<
+  UsageConfig,
+  "style" | "windows" | "resetFormat" | "showBankedResets"
+> & {
+  showResetTimes: boolean;
+};
+
 export function usageSegments(
   snapshot: UsageSnapshot,
-  options: { showResetTimes: boolean; showBankedResets?: boolean },
+  options: UsageDisplayOptions,
   now = Date.now(),
 ): UsageSegment[] {
   const windows = [
@@ -290,28 +299,48 @@ export function usageSegments(
       includeDate: true,
     },
   ];
-  const availableWindows = windows.filter(
+  const compact = options.style === "compact";
+  const selectedWindows = windows.filter((window) =>
+    options.windows === "weekly"
+      ? window.label === "7d"
+      : options.windows === "five-hour"
+        ? window.label === "5h"
+        : true,
+  );
+  const availableWindows = selectedWindows.filter(
     (window) => window.percent !== null || window.resetSeconds !== null,
   );
-  const displayedWindows = availableWindows.length > 0 ? availableWindows : windows;
-  const segments: UsageSegment[] = [{ text: "Usage: ", severity: "muted" }];
+  const displayedWindows = availableWindows.length > 0 ? availableWindows : selectedWindows;
+  const segments: UsageSegment[] = compact ? [] : [{ text: "Usage: ", severity: "muted" }];
   displayedWindows.forEach((window, index) => {
     if (index > 0) segments.push({ text: " · ", severity: "muted" });
-    segments.push({ text: `${window.label}: `, severity: "muted" });
+    segments.push({
+      text: `${compact && window.label === "7d" ? "W" : window.label}:${compact ? "" : " "}`,
+      severity: "muted",
+    });
     segments.push({
       text: formatPercent(window.percent),
       severity: severityForLeftPercent(window.percent),
     });
-  });
-  if (options.showResetTimes) {
-    for (const window of displayedWindows) {
-      const reset = formatCompactReset(
-        displayedWindows.length > 1 ? window.label : undefined,
-        remainingResetSeconds(window.resetSeconds, snapshot.capturedAt, now),
-        window.includeDate ? { includeDate: true } : undefined,
+    if (compact && options.showResetTimes) {
+      const seconds = remainingResetSeconds(window.resetSeconds, snapshot.capturedAt, now);
+      const reset = formatReset(
+        seconds,
+        { includeDate: window.includeDate, resetFormat: options.resetFormat },
         now,
       );
-      if (reset) segments.push({ text: ` · ${reset}`, severity: "muted" });
+      if (reset) segments.push({ text: ` ${reset}`, severity: "muted" });
+    }
+  });
+  if (!compact && options.showResetTimes) {
+    for (const window of displayedWindows) {
+      const reset = formatReset(
+        remainingResetSeconds(window.resetSeconds, snapshot.capturedAt, now),
+        { includeDate: window.includeDate, resetFormat: options.resetFormat },
+        now,
+      );
+      const label = displayedWindows.length > 1 ? `${window.label} ` : "";
+      if (reset) segments.push({ text: ` · ${label}↺ ${reset}`, severity: "muted" });
     }
   }
   const banked =
@@ -323,7 +352,7 @@ export function usageSegments(
 /** Flat text form of {@link usageSegments}, used for status lines and notifications. */
 export function formatUsageSnapshot(
   snapshot: UsageSnapshot,
-  options: { showResetTimes: boolean; showBankedResets?: boolean },
+  options: UsageDisplayOptions,
   now = Date.now(),
 ): string {
   return usageSegments(snapshot, options, now)

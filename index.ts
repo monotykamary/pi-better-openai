@@ -151,8 +151,7 @@ function colorizeUsageSegments(segments: UsageSegment[], theme: Theme): string {
     .join("");
 }
 
-/** Pair the fast-mode segment with the usage segments for the status widget. */
-function statusWidgetParts(
+function statusParts(
   fast: string | undefined,
   usage: UsageSegment[] | undefined,
 ): UsageSegment[] | undefined {
@@ -287,7 +286,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   let footerTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
   let footerInstalled = false;
   let statusInstalled = false;
-  let statusWidgetInstalled = false;
+  let footerSuppressed = false;
   let contextUsageCached = false;
   let cachedContextUsage: ReturnType<ExtensionContext["getContextUsage"]>;
   let cachedContextLeafId: string | null | undefined;
@@ -1281,6 +1280,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
           petController.stopPendingRenderRequest();
           petController.disposeKittyNow();
           footerInstalled = false;
+          // Another footer owner may have replaced us. Updates must not reclaim it.
+          footerSuppressed = true;
           petController.setFooterRenderRequest(undefined);
         },
         invalidate() {
@@ -1484,24 +1485,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     statusInstalled = text !== undefined;
   }
 
-  function setStatusWidget(ctx: ExtensionContext, parts: UsageSegment[] | undefined): void {
-    if (!parts && !statusWidgetInstalled) return;
-    ctx.ui.setWidget(
-      STATUS_KEY,
-      parts
-        ? (_tui, theme) => ({
-            invalidate() {},
-            render(width: number): string[] {
-              const line = colorizeUsageSegments(parts, theme);
-              return [truncateToWidth(line, width, theme.fg("dim", "..."))];
-            },
-          })
-        : undefined,
-      { placement: "belowEditor" },
-    );
-    statusWidgetInstalled = parts !== undefined;
-  }
-
   function updateFooter(ctx: ExtensionContext): void {
     const cfg = config(ctx);
 
@@ -1517,26 +1500,24 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     }
 
     petController.updateActivity(ctx, cfg);
-    const shouldRenderPet = petController.shouldRenderInFooter(cfg);
-
-    if (cfg.footer.mode === "replace" || shouldRenderPet) {
+    if (cfg.footer.mode === "replace" && !footerSuppressed) {
       setStatus(ctx, undefined);
-      setStatusWidget(ctx, undefined);
       installFooter(ctx);
       return;
     }
 
     clearFooter(ctx);
-    setStatus(ctx, undefined);
+    if (cfg.footer.mode !== "replace") footerSuppressed = false;
 
     if (cfg.footer.mode === "off") {
-      setStatusWidget(ctx, undefined);
+      setStatus(ctx, undefined);
       return;
     }
 
     const fast = fastController.statusSegment(ctx, cfg);
     const usage = usageController.statusSegments(ctx, cfg);
-    setStatusWidget(ctx, statusWidgetParts(fast, usage));
+    const parts = statusParts(fast, usage);
+    setStatus(ctx, parts ? colorizeUsageSegments(parts, ctx.ui.theme) : undefined);
   }
 
   pi.on("session_start", (_event, ctx) => {

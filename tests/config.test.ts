@@ -45,6 +45,12 @@ describe("config helpers", () => {
     expect(_test.CONFIG_BASENAME).toBe("pi-better-openai.json");
     expect(_test.DEFAULT_CONFIG).not.toHaveProperty("supportedModels");
     expect(_test.DEFAULT_CONFIG.desiredActive).toBe(false);
+    expect(_test.DEFAULT_CONFIG.footer?.mode).toBe("status");
+    expect(_test.DEFAULT_CONFIG.usage).toMatchObject({
+      style: "detailed",
+      windows: "all",
+      resetFormat: "both",
+    });
     expect(_test.DEFAULT_CONFIG.usage?.autoRedeemBankedResets).toBe(true);
     expect(_test.DEFAULT_IMAGE_CONFIG.defaultModel).toBe("gpt-image-2.5");
     expect(_test.DEFAULT_IMAGE_CONFIG.defaultSave).toBe("project");
@@ -305,6 +311,9 @@ describe("config helpers", () => {
           usage: {
             enabled: false,
             refreshIntervalMs: 20000,
+            style: "compact",
+            windows: "weekly",
+            resetFormat: "clock",
             showResetTimes: false,
             autoRedeemBankedResets: false,
           },
@@ -319,7 +328,7 @@ describe("config helpers", () => {
           },
         });
         writeConfig(paths.project, {
-          usage: { enabled: true },
+          usage: { enabled: true, resetFormat: "countdown" },
           footer: { mode: "status" },
           image: { outputFormat: "webp" },
           live: { enabled: true },
@@ -331,6 +340,9 @@ describe("config helpers", () => {
         expect(resolved.usage).toMatchObject({
           enabled: true,
           refreshIntervalMs: 20000,
+          style: "compact",
+          windows: "weekly",
+          resetFormat: "countdown",
           showResetTimes: false,
           autoRedeemBankedResets: false,
         });
@@ -355,6 +367,7 @@ describe("config helpers", () => {
     withTempDir((tempDir) => {
       const configPath = join(tempDir, "config.json");
       writeConfig(configPath, {
+        usage: { style: "tiny", windows: "daily", resetFormat: "date" },
         footer: { mode: "float" },
         image: { enabled: true, defaultSave: "desktop", outputFormat: "gif" },
         live: { enabled: false, voice: "robot" },
@@ -363,6 +376,7 @@ describe("config helpers", () => {
 
       const parsed = readConfig(configPath);
 
+      expect(parsed?.usage).toEqual({});
       expect(parsed?.footer).toBeUndefined();
       expect(parsed?.image).toEqual({ enabled: true });
       expect(parsed?.live).toEqual({ enabled: false });
@@ -393,6 +407,9 @@ describe("config helpers", () => {
       SETTINGS_OPTION_DESCRIPTORS.map((descriptor) => [descriptor.id, descriptor]),
     );
 
+    expect(descriptors.get("usage.style")?.parse("compact")).toBe("compact");
+    expect(descriptors.get("usage.windows")?.values).toEqual(["all", "weekly", "five-hour"]);
+    expect(descriptors.get("usage.resetFormat")?.parse("countdown")).toBe("countdown");
     expect(descriptors.get("usage.enabled")?.parse("true")).toBe(true);
     expect(descriptors.get("usage.autoRedeemBankedResets")?.parse("false")).toBe(false);
     expect(descriptors.get("usage.refreshIntervalMs")?.parse("15000")).toBe(15000);
@@ -430,6 +447,16 @@ describe("config helpers", () => {
       }),
     ).not.toHaveProperty("active");
 
+    for (const [key, value] of [
+      ["style", "compact"],
+      ["windows", "weekly"],
+      ["resetFormat", "countdown"],
+    ] as const) {
+      expect(applySettingToRawConfig(raw, `usage.${key}`, value).usage).toEqual({
+        unknownUsage: true,
+        [key]: value,
+      });
+    }
     expect(applySettingToRawConfig(raw, "usage.autoRedeemBankedResets", "false").usage).toEqual({
       unknownUsage: true,
       autoRedeemBankedResets: false,
