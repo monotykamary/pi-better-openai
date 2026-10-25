@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Allow `/openai-tier ultrafast` directly for OpenAI subscription OAuth on supported Astra/Sol endpoints, without an extra setting or unverified-support warning. Preserve API-key pricing notices and existing model/endpoint restrictions.
+
 ## 0.3.1
 
 - Add argument autocomplete for `/openai-tier` and `/openai-decisions`, including live registered classifier suggestions after `use`. Completion does not change settings or call providers.

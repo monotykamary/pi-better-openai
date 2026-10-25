@@ -3,7 +3,7 @@ import type { ResolvedConfig, ServiceTier, SupportedModel } from "./config.ts";
 import { isRecord } from "./config.ts";
 
 export const ULTRAFAST_NOTICE =
-  "Ultrafast uses 6x Standard token prices for API GPT-6 Astra (global/US) and GPT-6.1 Sol (global/US/EU). ChatGPT subscription access (openai OAuth or legacy openai-codex) is not verified. Host cost estimates may exclude tier premiums.";
+  "Ultrafast uses 6x Standard token prices for API GPT-6 Astra (global/US) and GPT-6.1 Sol (global/US/EU). Host cost estimates may exclude tier premiums.";
 
 export function currentModelKey(ctx: ExtensionContext): string {
   return ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none";
@@ -22,8 +22,7 @@ export function supportsUltrafast(ctx: ExtensionContext): boolean {
   if (
     model?.provider !== "openai" ||
     !["gpt-6-astra", "gpt-6.1-sol"].includes(model.id) ||
-    model.api !== "openai-responses" ||
-    ctx.modelRegistry.isUsingOAuth(model)
+    model.api !== "openai-responses"
   )
     return false;
   try {
@@ -117,10 +116,23 @@ export class FastController {
   stateText(ctx: ExtensionContext, cfg: ResolvedConfig): string {
     if (this.desiredTier === "ultrafast") {
       return this.active
-        ? `Ultrafast mode is on for ${currentModelKey(ctx)}. ${ULTRAFAST_NOTICE}`
+        ? `Ultrafast requested for ${currentModelKey(ctx)}. ${
+            this.isSubscription(ctx) ? "Subscription OAuth." : ULTRAFAST_NOTICE
+          }`
         : this.unsupportedRequestMessage(ctx, cfg);
     }
     return fastStateText(ctx, this.desiredActive, this.active, cfg.supportedModels);
+  }
+
+  private isSubscription(ctx: ExtensionContext): boolean {
+    return !!ctx.model && ctx.modelRegistry.isUsingOAuth(ctx.model);
+  }
+
+  selectionNoticeLevel(ctx: ExtensionContext): "warning" | "info" {
+    return (this.desiredActive && !this.active) ||
+      (this.desiredTier === "ultrafast" && !this.isSubscription(ctx))
+      ? "warning"
+      : "info";
   }
 
   unsupportedRequestMessage(ctx: ExtensionContext, cfg: ResolvedConfig): string {
@@ -179,7 +191,9 @@ export class FastController {
       `Ultrafast supported: ${supportsUltrafast(ctx)}`,
       `Last injected: ${this.lastInjectedAt ? `${new Date(this.lastInjectedAt).toLocaleTimeString()} (${this.lastInjectedModel}, ${this.lastInjectedTier})` : "never"}`,
       "Injection records requests, not server-confirmed service tiers or billing.",
-      ULTRAFAST_NOTICE,
+      this.isSubscription(ctx)
+        ? "Subscription OAuth; reported service tier may remain default."
+        : ULTRAFAST_NOTICE,
     ];
   }
 }

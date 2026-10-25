@@ -528,7 +528,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("openai-tier", {
-    description: "Select standard, fast, or ultrafast (API Astra/Sol; 6x Standard token prices)",
+    description: "Select standard, fast, or ultrafast (OpenAI Astra/Sol; API Ultrafast costs 6x)",
     getArgumentCompletions: openAITierArgumentCompletions,
     handler: async (args, ctx) => {
       const tier = args.trim().toLowerCase();
@@ -541,7 +541,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       }
       if (!isServiceTier(tier)) {
         ctx.ui.notify(
-          "Usage: /openai-tier [standard | fast | ultrafast]. Ultrafast explicitly opts into 6x Standard token prices.",
+          "Usage: /openai-tier [standard | fast | ultrafast]. API-key Ultrafast explicitly opts into 6x Standard token prices.",
           "error",
         );
         return;
@@ -550,12 +550,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       fastController.setTier(ctx, cfg, tier);
       persist(cfg);
       updateFooter(ctx);
-      ctx.ui.notify(
-        fastController.stateText(ctx, cfg),
-        tier === "ultrafast" || (fastController.desiredActive && !fastController.active)
-          ? "warning"
-          : "info",
-      );
+      ctx.ui.notify(fastController.stateText(ctx, cfg), fastController.selectionNoticeLevel(ctx));
     },
   });
 
@@ -1055,12 +1050,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     } else if (id === "serviceTier") {
       if (!isServiceTier(rawValue)) return;
       fastController.setTier(ctx, cfg, rawValue);
-      ctx.ui.notify(
-        fastController.stateText(ctx, cfg),
-        rawValue === "ultrafast" || (fastController.desiredActive && !fastController.active)
-          ? "warning"
-          : "info",
-      );
+      ctx.ui.notify(fastController.stateText(ctx, cfg), fastController.selectionNoticeLevel(ctx));
     }
     const petKey = id.startsWith("pets.") ? id.slice("pets.".length) : undefined;
     const nextRawConfig = applySettingToRawConfig(current, id, rawValue, {
@@ -1085,6 +1075,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     }
     writeConfig(cfg.configPath, nextRawConfig);
     const next = refresh(ctx);
+    fastController.applyDesiredState(ctx, next);
     if (id === "pets.enabled" || id === "pets.sizeCells" || id === "pets.slug")
       void petController.refresh(ctx, next);
     if (id.startsWith("usage.")) {

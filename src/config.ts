@@ -312,7 +312,7 @@ export const FAST_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     currentValue: (cfg) => cfg.serviceTier ?? (cfg.desiredActive ? "fast" : "standard"),
     values: SERVICE_TIERS,
     description:
-      "Ultrafast explicitly opts into 6x Standard token prices for API Astra (global/US only). Codex subscription access is not verified. Host cost estimates may exclude tier premiums.",
+      "Request Ultrafast for OpenAI Astra/Sol with API keys or subscription OAuth. API usage costs 6x Standard; legacy Codex stays unsupported.",
     parse: stringSetting,
   },
   {

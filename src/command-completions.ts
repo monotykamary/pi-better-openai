@@ -6,7 +6,7 @@ const TIERS: AutocompleteItem[] = [
   {
     value: "ultrafast",
     label: "ultrafast",
-    description: "API-key Astra/Sol only; 6x Standard token prices",
+    description: "Astra/Sol; API keys or subscription OAuth; API pricing 6x Standard",
   },
 ];
 

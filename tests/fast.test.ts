@@ -145,7 +145,7 @@ describe("service tiers", () => {
     },
   );
 
-  test("keeps Ultrafast API-only when OpenAI switches to ChatGPT OAuth", async () => {
+  test("keeps Ultrafast active when OpenAI switches to ChatGPT OAuth", async () => {
     const cwd = createTempProject();
     writeProjectConfig(cwd, { serviceTier: "ultrafast", supportedModels: undefined });
     const h = createHarness(cwd, createModel("openai", "gpt-6-astra"));
@@ -154,12 +154,12 @@ describe("service tiers", () => {
     expect(await beforeProviderRequest(h, payload)).toMatchObject({ service_tier: "ultrafast" });
 
     vi.mocked(h.ctx.modelRegistry.isUsingOAuth).mockReturnValue(true);
-    expect(await beforeProviderRequest(h, payload)).toBeUndefined();
+    expect(await beforeProviderRequest(h, payload)).toMatchObject({ service_tier: "ultrafast" });
     expect(readRawConfig(configPaths(cwd).project).serviceTier).toBe("ultrafast");
     await h.commands.get("openai-tier")!.handler("ultrafast", h.ctx);
     expect(h.ctx.ui.notify).toHaveBeenLastCalledWith(
-      expect.stringContaining("inactive"),
-      "warning",
+      expect.stringContaining("Ultrafast requested"),
+      "info",
     );
     await h.commands.get("openai-tier")!.handler("fast", h.ctx);
     expect(await beforeProviderRequest(h, payload)).toMatchObject({ service_tier: "priority" });
@@ -234,13 +234,10 @@ describe("service tiers", () => {
     "https://api.openai.com/v1",
     "https://us.api.openai.com/v1/",
     "https://eu.api.openai.com/v1",
-  ])("supports Sol Ultrafast with API keys at %s, but not OAuth", async (baseUrl) => {
+  ])("supports Sol Ultrafast with API keys and OAuth at %s", async (baseUrl) => {
     const cwd = createTempProject();
     writeProjectConfig(cwd, { serviceTier: "ultrafast" });
-    const h = createHarness(cwd, {
-      ...createModel("openai", "gpt-6.1-sol")!,
-      baseUrl,
-    });
+    const h = createHarness(cwd, { ...createModel("openai", "gpt-6.1-sol")!, baseUrl });
     await emit(h, "session_start");
     const payload = { model: "gpt-6.1-sol", input: [] };
     expect(await beforeProviderRequest(h, payload)).toEqual({
@@ -249,8 +246,75 @@ describe("service tiers", () => {
     });
     expect(payload).not.toHaveProperty("service_tier");
     vi.mocked(h.ctx.modelRegistry.isUsingOAuth).mockReturnValue(true);
-    expect(await beforeProviderRequest(h, payload)).toBeUndefined();
+    expect(await beforeProviderRequest(h, payload)).toEqual({
+      ...payload,
+      service_tier: "ultrafast",
+    });
   });
+
+  test.each(["gpt-6-astra", "gpt-6.1-sol"])(
+    "subscription %s selects Ultrafast without extra settings or warnings",
+    async (id) => {
+      const cwd = createTempProject();
+      writeProjectConfig(cwd, { serviceTier: "standard" });
+      const h = createHarness(cwd, createModel("openai", id));
+      vi.mocked(h.ctx.modelRegistry.isUsingOAuth).mockReturnValue(true);
+      await emit(h, "session_start");
+      await h.commands.get("openai-tier")!.handler("ultrafast", h.ctx);
+      expect(await beforeProviderRequest(h, { model: id })).toMatchObject({
+        service_tier: "ultrafast",
+      });
+      expect(h.ctx.ui.notify).toHaveBeenLastCalledWith(
+        expect.stringContaining("Ultrafast requested"),
+        "info",
+      );
+      expect(h.ctx.ui.notify).not.toHaveBeenCalledWith(expect.anything(), "warning");
+      expect(h.ctx.ui.notify).not.toHaveBeenCalledWith(
+        expect.stringContaining("6x Standard"),
+        expect.anything(),
+      );
+      expect(readRawConfig(configPaths(cwd).project).serviceTier).toBe("ultrafast");
+      await emit(h, "session_start");
+      expect(await beforeProviderRequest(h, { model: id })).toMatchObject({
+        service_tier: "ultrafast",
+      });
+      vi.mocked(h.ctx.modelRegistry.isUsingOAuth).mockReturnValue(false);
+      await h.commands.get("openai-tier")!.handler("ultrafast", h.ctx);
+      expect(h.ctx.ui.notify).toHaveBeenLastCalledWith(
+        expect.stringContaining("6x Standard"),
+        "warning",
+      );
+      vi.mocked(h.ctx.modelRegistry.isUsingOAuth).mockReturnValue(true);
+      await h.commands.get("openai-tier")!.handler("standard", h.ctx);
+      expect(await beforeProviderRequest(h, { model: id })).toMatchObject({
+        service_tier: "default",
+      });
+    },
+  );
+
+  test.each([
+    { provider: "openai-codex", id: "gpt-6.1-sol" },
+    { provider: "openai", id: "gpt-6.1-sol", baseUrl: "https://proxy.example/v1" },
+    { provider: "openai", id: "gpt-5.5" },
+  ])(
+    "subscription authentication does not bypass model or endpoint guards: %j",
+    async (overrides) => {
+      const cwd = createTempProject();
+      writeProjectConfig(cwd, { serviceTier: "ultrafast" });
+      const h = createHarness(cwd, {
+        ...createModel(overrides.provider, overrides.id)!,
+        ...overrides,
+      });
+      vi.mocked(h.ctx.modelRegistry.isUsingOAuth).mockReturnValue(true);
+      await emit(h, "session_start");
+      await h.commands.get("openai-tier")!.handler("ultrafast", h.ctx);
+      expect(await beforeProviderRequest(h, { model: overrides.id })).toBeUndefined();
+      expect(h.ctx.ui.notify).toHaveBeenLastCalledWith(
+        expect.stringContaining("inactive"),
+        "warning",
+      );
+    },
+  );
 
   test("rechecks capability on model switches and never injects into a different payload model", async () => {
     const cwd = createTempProject();
