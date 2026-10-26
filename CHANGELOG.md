@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- Add GPT-6.1 Terra to native OpenAI and legacy Codex model catalogs while preserving host authentication, transports, classifiers, and authoritative metadata. Use the documented 1.05M context for OpenAI and a conservative 272K context for Codex.
+- Enable Terra in the default Fast model list, migrate prior seeded defaults, and cover subscription visibility and catalog precedence. Ultrafast remains limited to existing supported models.
+
 ## 0.3.2
 
 - Allow `/openai-tier ultrafast` directly for OpenAI subscription OAuth on supported Astra/Sol endpoints, without an extra setting or unverified-support warning. Preserve API-key pricing notices and existing model/endpoint restrictions.

@@ -17,6 +17,7 @@ import {
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "./config.ts";
+import { withOpenAIModels } from "./openai-models.ts";
 
 export const OPENAI_DECISIONS_API = "openai-decisions";
 export const OPENAI_DECISIONS_MODEL: ClassifierModel<typeof OPENAI_DECISIONS_API> = {
@@ -408,7 +409,7 @@ export function createOpenAIDecisionsProvider(builtIn: Provider): Provider {
 export function registerOpenAIDecisionsProvider(pi: ExtensionAPI): void {
   const builtIn = builtinProviders().find((provider) => provider.id === "openai");
   if (!builtIn) return;
-  const provider = withOpenAIDecisions(builtIn);
-  if (provider !== builtIn) pi.registerProvider(provider);
+  const provider = withOpenAIModels(withOpenAIDecisions(builtIn));
+  pi.registerProvider(provider);
   pi.registerProvider(createOpenAIDecisionsProvider(provider));
 }

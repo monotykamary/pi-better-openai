@@ -131,7 +131,7 @@ afterEach(() => {
 });
 
 describe("service tiers", () => {
-  test.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])(
+  test.each(["gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])(
     "enables Fast by default for Codex %s",
     async (id) => {
       const cwd = createTempProject();
@@ -144,6 +144,18 @@ describe("service tiers", () => {
       });
     },
   );
+
+  test("enables Terra Fast with native OpenAI subscription auth", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, { serviceTier: "fast", supportedModels: undefined });
+    const h = createHarness(cwd, createModel("openai", "gpt-6.1-terra"));
+    h.ctx.modelRegistry.isUsingOAuth = () => true;
+    await emit(h, "session_start");
+    expect(await beforeProviderRequest(h, { model: "gpt-6.1-terra" })).toEqual({
+      model: "gpt-6.1-terra",
+      service_tier: "priority",
+    });
+  });
 
   test("keeps Ultrafast active when OpenAI switches to ChatGPT OAuth", async () => {
     const cwd = createTempProject();
@@ -204,6 +216,8 @@ describe("service tiers", () => {
   test.each([
     { provider: "openai-codex", id: "gpt-6-astra" },
     { provider: "openai", id: "gpt-6-sol" },
+    { provider: "openai", id: "gpt-6.1-terra" },
+    { provider: "openai-codex", id: "gpt-6.1-terra" },
     { provider: "openai-codex", id: "gpt-6.1-sol" },
     { provider: "openai", id: "gpt-6.1-sol", baseUrl: "https://proxy.example/v1" },
     { provider: "openai", id: "gpt-6.1-sol", baseUrl: "https://ae.api.openai.com/v1" },

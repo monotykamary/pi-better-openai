@@ -97,6 +97,7 @@ describe("OpenAI Codex model registration", () => {
       "gpt-6.1-sol",
       "gpt-daybreak-blue-latest",
       "gpt-daybreak-red-latest",
+      "gpt-6.1-terra",
     ]);
   });
 

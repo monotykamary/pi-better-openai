@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { OPENAI_TERRA_MODEL } from "./openai-models.ts";
 
 const CODEX_API = "openai-codex-responses" as const;
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -132,6 +133,14 @@ export const CODEX_MODEL_FALLBACKS: CodexModel[] = [
       cacheRead: 1.25,
       cacheWrite: 15.625,
     },
+    compat: CODEX_COMPAT,
+  },
+  {
+    ...OPENAI_TERRA_MODEL,
+    api: CODEX_API,
+    provider: CODEX_PROVIDER_ID,
+    baseUrl: CODEX_BASE_URL,
+    contextWindow: 272000,
     compat: CODEX_COMPAT,
   },
 ];

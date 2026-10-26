@@ -97,10 +97,12 @@ Default supported models:
   "openai/gpt-5.5",
   "openai/gpt-6-astra",
   "openai/gpt-6.1-sol",
+  "openai/gpt-6.1-terra",
   "openai/gpt-6-sol",
   "openai/gpt-6-luna",
   "openai-codex/gpt-6-astra",
   "openai-codex/gpt-6.1-sol",
+  "openai-codex/gpt-6.1-terra",
   "openai-codex/gpt-6-sol",
   "openai-codex/gpt-6-luna",
   "openai-codex/gpt-5.6-sol",
@@ -240,11 +242,15 @@ Example tool input:
 - Probabilities and confidence remain uncertain judgments; scores retain their provider-specific scale. No claim of cross-provider calibration is made. Decisions never authorize tools, execute commands, change the active model, or start background polling.
 - Reported classifier token usage/cost is included in tool results and the Better OpenAI footer. Missing usage or catalog pricing is not evidence that a request was free.
 
-## Codex model fallbacks
+## GPT-6.1 Terra and model fallbacks
 
-These chat fallbacks remain scoped to the legacy provider. Native `openai` chat models and transport are not replaced or redirected to Codex; only the missing Decisions classifier is added on older hosts.
+After `/reload`, select `/model openai/gpt-6.1-terra` with your existing `/login openai` subscription or API key. The extension adds Terra when it is missing from the host catalog, without replacing native transport, authentication, other chat models, or classifiers. Host catalog metadata takes precedence. Model visibility does not guarantee account entitlement.
 
-The extension adds `gpt-6.1-sol`, `gpt-6-astra`, `gpt-daybreak-blue-latest`, and `gpt-daybreak-red-latest` to the built-in `openai-codex` provider without requiring local `models.json` entries. Existing built-in models remain available, and metadata from pi's live catalog takes precedence when pi publishes an official entry with the same ID.
+The [GPT-6.1 Terra model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-terra) specifies text/image input, a 1.05M context window, 128K maximum output, and reasoning levels `none`, `low`, `medium`, `high`, `xhigh`, and `max`. Pi maps `off` to `none` and `minimal` to `low`. Standard per-million-token prices are $1 input, $5 output, $0.05 cached input, and $1.25 cache writes (30-minute retention), with published long-context multipliers above 272K input tokens. `/openai-tier fast` is supported; Terra is not enabled for Ultrafast.
+
+The legacy `/model openai-codex/gpt-6.1-terra` fallback uses a conservative 272K context window until the host publishes Codex-specific metadata. It requires its own `/login openai-codex`; a successful direct OpenAI subscription request does not verify Codex entitlement. Other chat fallbacks below remain scoped to that legacy provider.
+
+The extension adds `gpt-6.1-terra`, `gpt-6.1-sol`, `gpt-6-astra`, `gpt-daybreak-blue-latest`, and `gpt-daybreak-red-latest` to the built-in `openai-codex` provider without requiring local `models.json` entries. Existing built-in models remain available, and metadata from pi's live catalog takes precedence when pi publishes an official entry with the same ID.
 
 The GPT-6.1 Sol fallback uses Codex's conservative 272K context default, 128K output limit, and published short/long-context pricing. It maps Pi's `minimal` level to `low` and disables `off`; the model does not accept `none` or `minimal` reasoning efforts. See [model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol) and the [upstream Codex catalog change](https://github.com/openai/codex/commit/b1e72963c3b71a9265a551e54beff078384efed9).
 
