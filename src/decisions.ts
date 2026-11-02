@@ -1,9 +1,5 @@
-import {
-  Type,
-  type ClassifierContext,
-  type ClassifierResult,
-  type Static,
-} from "@earendil-works/pi-ai";
+import type { ClassifierContext, ClassifierResult } from "@earendil-works/pi-ai";
+import { Type, type Static } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   isRecord,

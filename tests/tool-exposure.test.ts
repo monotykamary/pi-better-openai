@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
   createAgentSession,
   DefaultResourceLoader,

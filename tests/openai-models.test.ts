@@ -3,7 +3,10 @@ import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test, vi } from "vitest";
 import { OPENAI_TERRA_MODEL, withOpenAIModels } from "../src/openai-models.ts";
-import { registerOpenAIDecisionsProvider } from "../src/openai-decisions.ts";
+import {
+  OPENAI_DECISIONS_MODEL,
+  registerOpenAIDecisionsProvider,
+} from "../src/openai-decisions.ts";
 import { CODEX_MODEL_FALLBACKS, createOpenAICodexProvider } from "../src/codex-models.ts";
 
 const native = () => builtinProviders().find((provider) => provider.id === "openai")!;
@@ -69,7 +72,7 @@ describe("GPT-6.1 Terra", () => {
 
   test("does not confuse a same-ID classifier with a chat model", () => {
     const base = native();
-    const classifier = { ...OPENAI_TERRA_MODEL, type: "classifier" as const };
+    const classifier = { ...OPENAI_DECISIONS_MODEL, id: OPENAI_TERRA_MODEL.id };
     const provider = withOpenAIModels({ ...base, getAllModels: () => [classifier] });
     expect(provider.getAllModels!()).toEqual([classifier, OPENAI_TERRA_MODEL]);
   });
@@ -90,7 +93,11 @@ describe("GPT-6.1 Terra", () => {
       (await registry.getAvailableOfType("chat", "openai")).find(
         (model) => model.id === OPENAI_TERRA_MODEL.id,
       ),
-    ).toEqual(OPENAI_TERRA_MODEL);
+    ).toEqual(
+      native()
+        .getModels()
+        .find((model) => model.id === OPENAI_TERRA_MODEL.id) ?? OPENAI_TERRA_MODEL,
+    );
     expect(await registry.getAvailableOfType("classifier", "openai")).toEqual([]);
     expect(registry.getModelOfType("classifier", "openai-decisions", "gpt-6-luna")).toBeDefined();
     expect((await credentials.read("openai"))?.type).toBe("oauth");
@@ -98,10 +105,15 @@ describe("GPT-6.1 Terra", () => {
 
   test("keeps the Codex fallback offline and accepts authoritative live Terra metadata", async () => {
     const fallback = CODEX_MODEL_FALLBACKS.find((model) => model.id === OPENAI_TERRA_MODEL.id)!;
+    const offline =
+      builtinProviders()
+        .find((provider) => provider.id === "openai-codex")!
+        .getModels()
+        .find((model) => model.id === fallback.id) ?? fallback;
     const live = { ...fallback, name: "Live Terra", contextWindow: 500000 };
     for (const response of [new Response(null, { status: 404 }), Response.json([live])]) {
       const provider = createOpenAICodexProvider({ fetch: vi.fn(async () => response) });
-      expect(provider.getModels()).toContainEqual(fallback);
+      expect(provider.getModels()).toContainEqual(offline);
       await provider.refreshModels?.({
         allowNetwork: true,
         force: true,
@@ -112,7 +124,7 @@ describe("GPT-6.1 Terra", () => {
         },
       });
       expect(provider.getModels().filter((model) => model.id === fallback.id)).toEqual([
-        response.status === 404 ? fallback : live,
+        response.status === 404 ? offline : live,
       ]);
     }
   });

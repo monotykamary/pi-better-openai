@@ -1,4 +1,4 @@
-import type { TSchema } from "@earendil-works/pi-ai";
+import type { TSchema } from "typebox";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 export interface OptionalTool {
