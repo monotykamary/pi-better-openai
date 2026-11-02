@@ -164,7 +164,11 @@ export class PetFooterController {
   }
 
   shouldRenderInFooter(cfg: ResolvedConfig, footerInstalled = this.getFooterInstalled()): boolean {
-    return cfg.pets.enabled || (this.petSettingsPreviewActive && footerInstalled);
+    return (
+      footerInstalled &&
+      cfg.footer.mode === "replace" &&
+      (cfg.pets.enabled || this.petSettingsPreviewActive)
+    );
   }
 
   setSettingsPreviewActive(ctx: ExtensionContext, next: boolean): void {
@@ -345,7 +349,7 @@ export class PetFooterController {
 
   private shouldRunIdleEmotes(ctx: ExtensionContext, cfg = this.getConfig(ctx)): boolean {
     return (
-      cfg.pets.enabled &&
+      this.shouldRenderInFooter(cfg) &&
       cfg.pets.idleEmotes &&
       getCapabilities().images !== null &&
       this.pet !== undefined &&
@@ -391,7 +395,7 @@ export class PetFooterController {
 
   updateActivity(ctx: ExtensionContext, cfg: ResolvedConfig): void {
     const resizeFrozen = this.isResizeFrozen();
-    const shouldAnimatePet = this.shouldLoadForConfig(cfg);
+    const shouldAnimatePet = this.shouldRenderInFooter(cfg) || this.petSettingsPreviewActive;
     if (!shouldAnimatePet || resizeFrozen) {
       this.stopAnimation();
     } else {
@@ -465,7 +469,9 @@ export class PetFooterController {
       if (this.petLoadNotify) {
         ctx.ui.notify(
           this.pet
-            ? `Rendering ${this.pet.pet.name} in the Better OpenAI footer.`
+            ? this.shouldRenderInFooter(cfg)
+              ? `Rendering ${this.pet.pet.name} in the Better OpenAI footer.`
+              : `Loaded ${this.pet.pet.name}; select Footer mode replace to render it.`
             : (petIssue?.message ?? "No ready custom Codex pet found."),
           this.pet ? "info" : "warning",
         );

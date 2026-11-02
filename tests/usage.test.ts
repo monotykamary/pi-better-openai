@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { _test } from "../index.ts";
 import { maskIdentifier, sanitizeDiagnosticError } from "../src/format.ts";
 import { MULTIPROVIDER_SERVICE_EVENT, type MultiproviderService } from "../src/multiprovider.ts";
+import { UsageController } from "../src/usage-controller.ts";
 import { severityForLeftPercent, usageSegments } from "../src/usage.ts";
 
 type EventHandler = (event: unknown, ctx: ExtensionContext) => unknown | Promise<unknown>;
@@ -153,6 +154,7 @@ async function createUsageHarness(options: {
       setFooter: vi.fn(),
       setStatus: vi.fn(),
       setWidget: vi.fn(),
+      theme: { fg: vi.fn((_color: string, value: string) => value) },
     },
     sessionManager: {
       getEntries: vi.fn(() => []),
@@ -350,6 +352,98 @@ describe("usage helpers", () => {
     expect(usage.scope).toBe("spark");
     expect(usage.fiveHourLeftPercent).toBe(90);
     expect(usage.sevenDayLeftPercent).toBe(80);
+  });
+});
+
+describe("usage display customization", () => {
+  const capturedAt = new Date("2026-07-09T12:00:00Z").getTime();
+  const usage = _test.parseUsageSnapshot(
+    {
+      rate_limit: {
+        primary_window: { used_percent: 100, reset_after_seconds: 3600 },
+        secondary_window: { used_percent: 30, reset_after_seconds: 5 * 86400 + 12 * 3600 },
+      },
+      rate_limit_reset_credits: { available_count: 2 },
+    },
+    "gpt-5.5",
+    capturedAt,
+  );
+  const options = {
+    style: "compact",
+    windows: "weekly",
+    resetFormat: "countdown",
+    showResetTimes: true,
+    showBankedResets: false,
+  } as const;
+
+  test("renders the exact compact weekly countdown and adjusts elapsed time", () => {
+    expect(_test.formatUsageSnapshot(usage, options, capturedAt)).toBe("W:70% 5d12h");
+    expect(_test.formatUsageSnapshot(usage, options, capturedAt + 3600000)).toBe("W:70% 5d11h");
+    expect(
+      _test.formatUsageSnapshot(usage, { ...options, showResetTimes: false }, capturedAt),
+    ).toBe("W:70%");
+    expect(
+      _test.formatUsageSnapshot(usage, { ...options, showBankedResets: true }, capturedAt),
+    ).toBe("W:70% 5d12h · 2 banked resets");
+  });
+
+  test("keeps zero quota distinct from missing windows and preserves severity", () => {
+    const fiveHour = { ...options, windows: "five-hour" } as const;
+    expect(usageSegments(usage, fiveHour, capturedAt)).toEqual([
+      { text: "5h:", severity: "muted" },
+      { text: "0%", severity: "critical" },
+      { text: " 1h0m", severity: "muted" },
+    ]);
+    const missing = { ...usage, fiveHourLeftPercent: null, fiveHourResetInSeconds: null };
+    expect(_test.formatUsageSnapshot(missing, fiveHour, capturedAt)).toBe("5h:--");
+    expect(_test.formatUsageSnapshot(missing, { ...options, windows: "all" }, capturedAt)).toBe(
+      "W:70% 5d12h",
+    );
+    expect(_test.formatUsageSnapshot(usage, { ...options, windows: "all" }, capturedAt)).toBe(
+      "5h:0% 1h0m · W:70% 5d12h",
+    );
+  });
+
+  test("supports clock-only and both reset formats in either style", () => {
+    for (const style of ["compact", "detailed"] as const) {
+      const clock = _test.formatUsageSnapshot(
+        usage,
+        { ...options, style, resetFormat: "clock" },
+        capturedAt,
+      );
+      const both = _test.formatUsageSnapshot(
+        usage,
+        { ...options, style, resetFormat: "both" },
+        capturedAt,
+      );
+      expect(clock).not.toContain("5d12h");
+      expect(both).toContain(`5d12h - ${clock.split(style === "compact" ? "W:70% " : " · ↺ ")[1]}`);
+    }
+    expect(_test.formatUsageSnapshot(usage, { ...options, style: "detailed" }, capturedAt)).toBe(
+      "Usage: 7d: 70% · ↺ 5d12h",
+    );
+  });
+
+  test("command status remains detailed with all windows despite display configuration", () => {
+    const cwd = createTempDir("pi-better-openai-usage-config-");
+    process.env.PI_CODING_AGENT_DIR = cwd;
+    const cfg = _test.resolveConfig(cwd);
+    cfg.usage = { ...cfg.usage, ...options };
+    const controller = new UsageController(
+      () => cfg,
+      () => {},
+    );
+    Object.assign(controller, { usageSnapshot: usage });
+    const ctx = {
+      model: { provider: "openai-codex", id: "gpt-5.5" },
+      modelRegistry: { isUsingOAuth: () => true },
+    } as unknown as ExtensionContext;
+    vi.spyOn(Date, "now").mockReturnValue(capturedAt);
+    expect(controller.statusLine(ctx)).toBe("W:70% 5d12h");
+    expect(controller.formatStatus(ctx)).toMatch(/^Usage: 5h: 0% · 7d: 70% · 5h ↺ 1h0m - /);
+    expect(controller.formatStatus(ctx)).not.toContain("banked");
+    cfg.usage.showResetTimes = false;
+    expect(controller.formatStatus(ctx)).toBe("Usage: 5h: 0% · 7d: 70%");
   });
 });
 
@@ -588,27 +682,13 @@ describe("usage polling lifecycle", () => {
 
       await emit(harness, "session_start");
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-      await vi.waitFor(() => expect(harness.ctx.ui.setWidget).toHaveBeenCalled());
-
-      const widgetFactory = vi.mocked(harness.ctx.ui.setWidget).mock.calls.at(-1)?.[1];
-      expect(widgetFactory).toEqual(expect.any(Function));
-      if (typeof widgetFactory !== "function") throw new Error("Expected a status widget factory");
-      const colorCalls: Array<[string, string]> = [];
-      const widget = widgetFactory(
-        {} as never,
-        {
-          fg: (color: string, value: string) => {
-            colorCalls.push([color, value]);
-            return value;
-          },
-        } as never,
-      );
-      expect(widget.render(200)[0]).toContain("Usage:");
-      expect(widget.render(200)[0]).toContain("5h: 90%");
-      expect(colorCalls).toContainEqual(["success", "90%"]);
-      expect(colorCalls).toContainEqual(["dim", "Usage: "]);
-      if (provider === "openai") expect(widget.render(200)[0]).toContain("Codex Usage:");
-      else expect(widget.render(200)[0]).not.toContain("Codex Usage:");
+      await vi.waitFor(() => expect(harness.ctx.ui.setStatus).toHaveBeenCalled());
+      expect(statusLine(harness)).toContain("Usage:");
+      expect(statusLine(harness)).toContain("5h: 90%");
+      expect(harness.ctx.ui.theme.fg).toHaveBeenCalledWith("success", "90%");
+      expect(harness.ctx.ui.theme.fg).toHaveBeenCalledWith("dim", "Usage: ");
+      if (provider === "openai") expect(statusLine(harness)).toContain("Codex Usage:");
+      else expect(statusLine(harness)).not.toContain("Codex Usage:");
       await harness.commands.get("openai-usage")!.handler("", harness.ctx);
       if (provider === "openai") {
         expect(harness.ctx.ui.notify).toHaveBeenLastCalledWith(
@@ -779,9 +859,7 @@ describe("usage polling lifecycle", () => {
       expect.stringContaining("5h: 90%"),
       expect.anything(),
     );
-    expect(harness.ctx.ui.setWidget).toHaveBeenLastCalledWith(expect.any(String), undefined, {
-      placement: "belowEditor",
-    });
+    expect(harness.ctx.ui.setStatus).toHaveBeenLastCalledWith(expect.any(String), undefined);
   });
 });
 
@@ -820,16 +898,9 @@ function fakeMultiproviderService() {
   };
 }
 
-/** Renders the most recently installed status widget, flattened for assertions. */
-function widgetLine(harness: UsageHarness): string {
-  const calls = vi.mocked(harness.ctx.ui.setWidget).mock.calls;
-  for (let index = calls.length - 1; index >= 0; index -= 1) {
-    const factory = calls[index]?.[1];
-    if (typeof factory !== "function") continue;
-    const widget = factory({} as never, { fg: (_color: string, value: string) => value } as never);
-    return widget.render(200).join("\n");
-  }
-  throw new Error("Expected a status widget to be installed");
+/** Returns the most recently published public status line. */
+function statusLine(harness: UsageHarness): string {
+  return vi.mocked(harness.ctx.ui.setStatus).mock.calls.at(-1)?.[1] ?? "";
 }
 
 describe("multiprovider resume", () => {
@@ -876,7 +947,7 @@ describe("multiprovider resume", () => {
     // replayed the session's switch journal, so the first paint shows the
     // upstream account.
     await emit(harness, "session_start");
-    await vi.waitFor(() => expect(widgetLine(harness)).toContain("5h: 90%"));
+    await vi.waitFor(() => expect(statusLine(harness)).toContain("5h: 90%"));
 
     // The replay then restores the account and tells followers about it.
     service.resolve(async () => ({
@@ -890,7 +961,7 @@ describe("multiprovider resume", () => {
       ctx: harness.ctx,
     });
 
-    await vi.waitFor(() => expect(widgetLine(harness)).toContain("5h: 30%"));
+    await vi.waitFor(() => expect(statusLine(harness)).toContain("5h: 30%"));
     expect(service.resolveActiveAccountAuth).toHaveBeenCalledWith(
       "openai-codex",
       harness.ctx,

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import betterOpenAI from "../index.ts";
 import { configPaths, readRawConfig } from "../src/config.ts";
 
@@ -124,7 +124,12 @@ async function beforeProviderRequest(
   return results.find((result) => result !== undefined);
 }
 
+beforeEach(() => {
+  vi.stubEnv("PI_CODING_AGENT_DIR", createTempProject());
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const tempDir of tempDirs.splice(0)) {
     rmSync(tempDir, { recursive: true, force: true });
   }
