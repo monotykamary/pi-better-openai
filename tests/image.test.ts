@@ -222,45 +222,58 @@ describe("image helpers", () => {
 });
 
 describe("openai_image tool execution", () => {
-  test("executes through the standalone Codex image generation endpoint", async () => {
-    const fetchMock = stubFetch(codexImageResponse());
-    const harness = createImageHarness({
-      registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
-    });
+  test.each(["openai", "openai-codex"])(
+    "generates images while chatting with %s",
+    async (provider) => {
+      const fetchMock = stubFetch(codexImageResponse());
+      const harness = createImageHarness({
+        registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
+      });
 
-    const result = await executeImageTool(harness, { prompt: "draw an otter", save: "none" });
+      harness.ctx.model = { provider, id: "gpt-6.1-sol" } as ExtensionContext["model"];
+      vi.mocked(harness.ctx.modelRegistry.getApiKeyForProvider).mockImplementation(async (id) =>
+        id === "openai-codex"
+          ? JSON.stringify({ access: "test-access", accountId: "acct_test" })
+          : "direct-openai-access",
+      );
 
-    expect(harness.tool.name).toBe("openai_image");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(_test.imageTest.CODEX_IMAGE_GENERATIONS_URL);
-    expect(init.headers).toMatchObject({
-      authorization: "Bearer test-access",
-      "chatgpt-account-id": "acct_test",
-      accept: "application/json",
-      "x-codex-image-turn-id": expect.any(String),
-    });
-    expect(JSON.parse(String(init.body))).toEqual({
-      prompt: "draw an otter",
-      background: "auto",
-      model: "gpt-image-2.5",
-      quality: "auto",
-      size: "auto",
-    });
-    expect(result.content).toEqual([
-      { type: "text", text: expect.stringContaining("Generated image") },
-      { type: "image", data: "Zm9v", mimeType: "image/png" },
-    ]);
-    expect(result.details).toMatchObject({
-      id: expect.stringMatching(/^ig_/),
-      status: "completed",
-      data: "Zm9v",
-      model: "gpt-image-2.5",
-      action: "generate",
-      outputFormat: "png",
-      savedPath: undefined,
-    });
-  });
+      const result = await executeImageTool(harness, { prompt: "draw an otter", save: "none" });
+      expect(harness.ctx.modelRegistry.getApiKeyForProvider).toHaveBeenCalledExactlyOnceWith(
+        "openai-codex",
+      );
+
+      expect(harness.tool.name).toBe("openai_image");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(_test.imageTest.CODEX_IMAGE_GENERATIONS_URL);
+      expect(init.headers).toMatchObject({
+        authorization: "Bearer test-access",
+        "chatgpt-account-id": "acct_test",
+        accept: "application/json",
+        "x-codex-image-turn-id": expect.any(String),
+      });
+      expect(JSON.parse(String(init.body))).toEqual({
+        prompt: "draw an otter",
+        background: "auto",
+        model: "gpt-image-2.6",
+        quality: "auto",
+        size: "auto",
+      });
+      expect(result.content).toEqual([
+        { type: "text", text: expect.stringContaining("Generated image") },
+        { type: "image", data: "Zm9v", mimeType: "image/png" },
+      ]);
+      expect(result.details).toMatchObject({
+        id: expect.stringMatching(/^ig_/),
+        status: "completed",
+        data: "Zm9v",
+        model: "gpt-image-2.6",
+        action: "generate",
+        outputFormat: "png",
+        savedPath: undefined,
+      });
+    },
+  );
 
   test("maps legacy chat models to the default image model", async () => {
     for (const legacyModel of ["openai-codex/gpt-5.5", "openai-codex/gpt-6-astra"]) {
@@ -276,25 +289,24 @@ describe("openai_image tool execution", () => {
       });
 
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-image-2.5" });
+      expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-image-2.6" });
     }
   });
 
-  test("passes explicit image model overrides through unchanged", async () => {
-    const fetchMock = stubFetch(codexImageResponse());
-    const harness = createImageHarness({
-      registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
-    });
+  test.each(["gpt-image-2.5", "gpt-image-2"])(
+    "passes explicit image model override %s through unchanged",
+    async (model) => {
+      const fetchMock = stubFetch(codexImageResponse());
+      const harness = createImageHarness({
+        registryCredentials: JSON.stringify({ access: "test-access", accountId: "acct_test" }),
+      });
 
-    await executeImageTool(harness, {
-      prompt: "draw",
-      model: "gpt-image-2",
-      save: "none",
-    });
+      await executeImageTool(harness, { prompt: "draw", model, save: "none" });
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-image-2" });
-  });
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(JSON.parse(String(init.body))).toMatchObject({ model });
+    },
+  );
 
   test("converts standalone PNG results to the requested output format locally", async () => {
     const png = await sharp({
@@ -368,7 +380,7 @@ describe("openai_image tool execution", () => {
       ],
       prompt: "edit it",
       background: "auto",
-      model: "gpt-image-2.5",
+      model: "gpt-image-2.6",
       quality: "auto",
       size: "auto",
     });
@@ -644,7 +656,7 @@ describe("openai_image tool execution", () => {
 
     expect(debug).toMatchObject({
       endpoint: _test.imageTest.CODEX_IMAGES_BASE_URL,
-      defaultModel: "gpt-image-2.5",
+      defaultModel: "gpt-image-2.6",
       accountId: "acct...cdef",
     });
     expect(debug.accountId).not.toBe("acct_1234567890abcdef");

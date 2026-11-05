@@ -30,6 +30,7 @@ function writeCodexAuth(agentDir: string): void {
     join(agentDir, "auth.json"),
     `${JSON.stringify(
       {
+        openai: { type: "oauth", access: "direct-openai-access", expires: Date.now() + 3600000 },
         "openai-codex": {
           type: "oauth",
           access: "resets-access",
@@ -180,7 +181,7 @@ async function createResetsHarness(config: Record<string, unknown> = {}): Promis
   const ctx = {
     cwd,
     hasUI: true,
-    model: { provider: "openai", id: "gpt-5.5" },
+    model: { provider: "openai", id: "gpt-6.1-sol" },
     ui: {
       notify: vi.fn(),
       select: vi.fn(),
@@ -519,7 +520,7 @@ describe("/openai-resets command", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Banked reset redemption cancelled.", "info");
   });
 
-  test("redeems exactly one credit after confirmation", async () => {
+  test("redeems one Codex credit after confirmation while using OpenAI with both logins", async () => {
     const fetchMock = stubResetsFetch();
     const { ctx, commands } = await createResetsHarness();
     vi.mocked(ctx.ui.confirm).mockResolvedValue(true);
@@ -534,6 +535,17 @@ describe("/openai-resets command", () => {
     expect(url).toContain("rate-limit-reset-credits/consume");
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.credit_id).toBe("RateLimitResetCredit_test1");
+    for (const [, request] of fetchMock.mock.calls) {
+      expect(request?.headers).toMatchObject({
+        authorization: "Bearer resets-access",
+        "chatgpt-account-id": "acct_resets",
+      });
+    }
+    expect(
+      vi
+        .mocked(ctx.modelRegistry.getApiKeyForProvider)
+        .mock.calls.every(([provider]) => provider === "openai-codex"),
+    ).toBe(true);
     expect(body.redeem_request_id).toMatch(/^[0-9a-f][0-9a-f-]{35}$/);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "Banked reset redeemed — 2 usage windows refreshed.",
@@ -602,14 +614,19 @@ describe("/openai-resets command", () => {
 });
 
 describe("automatic reset extension wiring", () => {
-  test.each([true, false])(
-    "default on and opt-out (%s), even without usage display or an OpenAI model",
-    async (enabled) => {
+  test.each([
+    { enabled: true, provider: "openai" },
+    { enabled: false, provider: "openai" },
+    { enabled: true, provider: "anthropic" },
+    { enabled: false, provider: "anthropic" },
+  ])(
+    "auto-redemption enabled=$enabled while chatting with $provider and usage hidden",
+    async ({ enabled, provider }) => {
       const fetchMock = stubResetsFetch();
       const harness = await createResetsHarness({
         usage: { enabled: false, ...(enabled ? {} : { autoRedeemBankedResets: false }) },
       });
-      harness.ctx.model = { provider: "anthropic", id: "test" } as ExtensionContext["model"];
+      harness.ctx.model = { provider, id: "test" } as ExtensionContext["model"];
       const base = Date.now();
       const response = creditsResponseBody();
       response.credits[0]!.expires_at = new Date(base + 1_000).toISOString();
@@ -629,6 +646,12 @@ describe("automatic reset extension wiring", () => {
       await settleAsyncWork();
       await vi.advanceTimersByTimeAsync(1);
       expect(consumeCalls(fetchMock)).toHaveLength(enabled ? 1 : 0);
+      for (const [, request] of fetchMock.mock.calls) {
+        expect(request?.headers).toMatchObject({
+          authorization: "Bearer resets-access",
+          "chatgpt-account-id": "acct_resets",
+        });
+      }
       await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(consumeCalls(fetchMock)).toHaveLength(enabled ? 1 : 0);
       expect(harness.ctx.ui.confirm).not.toHaveBeenCalled();

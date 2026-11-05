@@ -257,72 +257,83 @@ describe("websearch config", () => {
 });
 
 describe("openai_websearch tool execution", () => {
-  test("sends the Codex search request and formats cited results", async () => {
-    const fetchMock = stubFetch(codexSearchResponse());
-    const harness = createWebsearchHarness();
+  test.each(["openai", "openai-codex"])(
+    "searches with Codex auth while chatting with %s",
+    async (provider) => {
+      const fetchMock = stubFetch(codexSearchResponse());
+      const harness = createWebsearchHarness();
 
-    const result = await executeSearch(harness, { query: "effect typescript" });
+      harness.ctx.model = { provider, id: "gpt-6.1-sol" } as ExtensionContext["model"];
+      vi.mocked(harness.ctx.modelRegistry.getApiKeyForProvider).mockImplementation(async (id) =>
+        id === "openai-codex" ? REGISTRY_CREDENTIALS : "direct-openai-access",
+      );
 
-    expect(harness.tool.name).toBe("openai_websearch");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(_test.websearchTest.CODEX_SEARCH_URL);
-    expect(init).toMatchObject({
-      method: "POST",
-      redirect: "error",
-      credentials: "omit",
-      cache: "no-store",
-      referrerPolicy: "no-referrer",
-    });
-    expect(init.headers).toMatchObject({
-      authorization: "Bearer test-access",
-      "chatgpt-account-id": "acct_test",
-      accept: "application/json",
-      "content-type": "application/json",
-      originator: "codex_cli_rs",
-    });
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({
-      model: "gpt-5.6-luna",
-      reasoning: { effort: "max" },
-      input: "effect typescript",
-      commands: {
-        search_query: [{ q: "effect typescript" }],
-        response_length: "short",
-      },
-      settings: { allowed_callers: ["direct"], external_web_access: true },
-      max_output_tokens: 4096,
-    });
-    expect(typeof body.id).toBe("string");
+      const result = await executeSearch(harness, { query: "effect typescript" });
+      expect(harness.ctx.modelRegistry.getApiKeyForProvider).toHaveBeenCalledExactlyOnceWith(
+        "openai-codex",
+      );
 
-    expect(result.content).toEqual([
-      {
-        type: "text",
-        text: expect.stringContaining("Search completed") as unknown as string,
-      },
-    ]);
-    const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain("1. [Effect](https://effect.website/)");
-    expect(text).not.toContain("javascript:");
-    expect(result.details).toMatchObject({
-      query: "effect typescript",
-      answer: "Search completed",
-      model: "gpt-5.6-luna",
-      results: [
-        { url: "https://effect.website/", title: "Effect", content: "Effect documentation" },
-      ],
-    });
+      expect(harness.tool.name).toBe("openai_websearch");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(_test.websearchTest.CODEX_SEARCH_URL);
+      expect(init).toMatchObject({
+        method: "POST",
+        redirect: "error",
+        credentials: "omit",
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+      });
+      expect(init.headers).toMatchObject({
+        authorization: "Bearer test-access",
+        "chatgpt-account-id": "acct_test",
+        accept: "application/json",
+        "content-type": "application/json",
+        originator: "codex_cli_rs",
+      });
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        model: "gpt-5.6-luna",
+        reasoning: { effort: "max" },
+        input: "effect typescript",
+        commands: {
+          search_query: [{ q: "effect typescript" }],
+          response_length: "short",
+        },
+        settings: { allowed_callers: ["direct"], external_web_access: true },
+        max_output_tokens: 4096,
+      });
+      expect(typeof body.id).toBe("string");
 
-    const debug = await harness.getDebug(harness.ctx);
-    expect(debug).toMatchObject({
-      authFound: true,
-      authSource: "modelRegistry",
-      accountId: "acct...test",
-      endpoint: _test.websearchTest.CODEX_SEARCH_URL,
-      enabled: true,
-      lastStatus: "completed (1 sources)",
-    });
-  });
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining("Search completed") as unknown as string,
+        },
+      ]);
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain("1. [Effect](https://effect.website/)");
+      expect(text).not.toContain("javascript:");
+      expect(result.details).toMatchObject({
+        query: "effect typescript",
+        answer: "Search completed",
+        model: "gpt-5.6-luna",
+        results: [
+          { url: "https://effect.website/", title: "Effect", content: "Effect documentation" },
+        ],
+      });
+
+      const debug = await harness.getDebug(harness.ctx);
+      expect(debug).toMatchObject({
+        authFound: true,
+        authSource: "modelRegistry",
+        accountId: "acct...test",
+        endpoint: _test.websearchTest.CODEX_SEARCH_URL,
+        enabled: true,
+        lastStatus: "completed (1 sources)",
+      });
+    },
+  );
 
   test("honours the responseLength override parameter", async () => {
     const fetchMock = stubFetch(codexSearchResponse());

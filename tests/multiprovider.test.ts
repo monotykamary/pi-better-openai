@@ -1,3 +1,4 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, test, vi } from "vitest";
 import { getCodexCredentials } from "../src/codex-auth.ts";
 import {
@@ -63,25 +64,33 @@ test("tracks the active service", () => {
   expect(getActiveMultiproviderService()).toBeUndefined();
 });
 
-test("prefers the multiprovider pinned account over registry credentials", async () => {
-  const service = fakeService(async () => ({
-    accessToken: codexJwt("acct_pooled"),
-    label: "Work",
-    source: "Work · Codex OAuth",
-  }));
-  setActiveMultiproviderService(service);
-  const ctx = credentialContext();
+test.each(["openai", "openai-codex"])(
+  "prefers the pinned Codex account while chatting with %s",
+  async (provider) => {
+    const service = fakeService(async () => ({
+      accessToken: codexJwt("acct_pooled"),
+      label: "Work",
+      source: "Work · Codex OAuth",
+    }));
+    setActiveMultiproviderService(service);
+    const ctx = credentialContext();
+    if (ctx) ctx.model = { provider, id: "gpt-6.1-sol" } as ExtensionContext["model"];
 
-  const credentials = await getCodexCredentials(ctx);
+    const credentials = await getCodexCredentials(ctx);
 
-  expect(credentials).toEqual({
-    accessToken: codexJwt("acct_pooled"),
-    accountId: "acct_pooled",
-    source: "multiprovider",
-  });
-  expect(service.resolveActiveAccountAuth).toHaveBeenCalledWith(CODEX_PROVIDER_ID, ctx, undefined);
-  expect(ctx?.modelRegistry?.getApiKeyForProvider).not.toHaveBeenCalled();
-});
+    expect(credentials).toEqual({
+      accessToken: codexJwt("acct_pooled"),
+      accountId: "acct_pooled",
+      source: "multiprovider",
+    });
+    expect(service.resolveActiveAccountAuth).toHaveBeenCalledWith(
+      CODEX_PROVIDER_ID,
+      ctx,
+      undefined,
+    );
+    expect(ctx?.modelRegistry?.getApiKeyForProvider).not.toHaveBeenCalled();
+  },
+);
 
 test("falls back to registry credentials when no pooled account resolves", async () => {
   setActiveMultiproviderService(fakeService(async () => undefined));

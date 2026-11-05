@@ -46,7 +46,7 @@ describe("config helpers", () => {
     expect(_test.DEFAULT_CONFIG).not.toHaveProperty("supportedModels");
     expect(_test.DEFAULT_CONFIG.desiredActive).toBe(false);
     expect(_test.DEFAULT_CONFIG.usage?.autoRedeemBankedResets).toBe(true);
-    expect(_test.DEFAULT_IMAGE_CONFIG.defaultModel).toBe("gpt-image-2.5");
+    expect(_test.DEFAULT_IMAGE_CONFIG.defaultModel).toBe("gpt-image-2.6");
     expect(_test.DEFAULT_IMAGE_CONFIG.defaultSave).toBe("project");
     expect(_test.DEFAULT_LIVE_CONFIG).toEqual({ enabled: true, voice: "sol" });
     expect(_test.DEFAULT_PET_CONFIG.placement).toBe("inline-right");
@@ -267,11 +267,13 @@ describe("config helpers", () => {
         "gpt-daybreak-blue-latest",
       ]) {
         writeConfig(configPath, { image: { defaultModel: legacyModel } });
-        expect(_test.resolveConfig(tempDir).image.defaultModel).toBe("gpt-image-2.5");
+        expect(_test.resolveConfig(tempDir).image.defaultModel).toBe("gpt-image-2.6");
       }
 
-      writeConfig(configPath, { image: { defaultModel: "gpt-image-2" } });
-      expect(_test.resolveConfig(tempDir).image.defaultModel).toBe("gpt-image-2");
+      for (const model of ["gpt-image-2.6", "gpt-image-2.5", "gpt-image-2"]) {
+        writeConfig(configPath, { image: { defaultModel: model } });
+        expect(_test.resolveConfig(tempDir).image.defaultModel).toBe(model);
+      }
     });
   });
 
@@ -421,7 +423,11 @@ describe("config helpers", () => {
     ).toBe("");
     expect(descriptors.get("pets.sizeCells")?.parse("12")).toBe(12);
     expect(descriptors.get("image.timeoutMs")?.parse("45000")).toBe(45000);
-    expect(descriptors.get("image.defaultModel")?.values).toEqual(["gpt-image-2.5", "gpt-image-2"]);
+    expect(descriptors.get("image.defaultModel")?.values).toEqual([
+      "gpt-image-2.6",
+      "gpt-image-2.5",
+      "gpt-image-2",
+    ]);
     expect(descriptors.get("live.enabled")?.parse("true")).toBe(true);
     expect(descriptors.get("live.voice")?.parse("vale")).toBe("vale");
   });

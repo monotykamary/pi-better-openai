@@ -24,6 +24,16 @@ Pi 1.0.2 supports **Sign in with ChatGPT** under `/login openai`, using the nati
 
 Pi labels `openai-codex` **legacy**, but this extension's usage polling, banked resets, image generation, web search, and live voice still call separate `chatgpt.com/backend-api` endpoints. They require the legacy Codex login, not the new direct-OpenAI OAuth grant. Credentials are never copied or substituted between providers.
 
+For both subscription chat and Codex backend features in one session:
+
+```text
+/login openai
+/login openai-codex
+/model openai/gpt-6.1-sol
+```
+
+Keep the `openai/*` chat model selected: images, web search, live voice, usage, and banked resets still use the independently logged-in Codex account. The usage widget labels its quota **Codex Usage** and includes banked-reset counts; confirmed and automatic redemptions target that Codex account, which may differ from your OpenAI login.
+
 1. For those backend features, also run `/login openai-codex`. You can keep an `openai/*` model selected.
 2. Inspect the Codex account's usage with `/openai-usage`, or open `/openai-settings` and check **Diagnostics**. While using `openai/*`, the footer labels it **Codex Usage**: it is not verified against your active OpenAI login and could belong to a different account. For your OpenAI subscription, check [ChatGPT usage](https://chatgpt.com/settings/usage).
 3. The extension reads auth from pi's agent auth store, normally `~/.pi/agent/auth.json`. Do not copy, paste, or commit values from this file.
@@ -137,7 +147,7 @@ Example config:
   },
   "image": {
     "enabled": true,
-    "defaultModel": "gpt-image-2.5",
+    "defaultModel": "gpt-image-2.6",
     "defaultSave": "project",
     "outputFormat": "png",
     "timeoutMs": 180000
@@ -273,6 +283,8 @@ The feature uses Codex Desktop's experimental `gpt-live-1-codex`/Quicksilver pro
 
 ## Image generation
 
+The default model is `gpt-image-2.6` through legacy `/login openai-codex` subscription auth. Explicitly configured image models are preserved; `gpt-image-2.5` and `gpt-image-2` remain available in settings.
+
 Use the command for quick generation:
 
 ```text
@@ -284,7 +296,7 @@ Agents can call the `openai_image` tool directly. Supported parameters:
 - `prompt` (required): pass the user's image wording verbatim.
 - `action`: `auto`, `generate`, or `edit`. `auto` uses the edit endpoint when `images` are supplied; explicit `edit` requires images, while explicit `generate` does not accept them.
 - `images`: up to five distinct project-local reference/edit image paths. Paths must stay inside the current workspace and point to readable PNG, JPEG, WebP, or GIF files; each file is limited to 20 MB and the combined input to 50 MB.
-- `model`: GPT Image model override for the standalone Codex Images API, for example `gpt-image-2.5` or `gpt-image-2`. Values outside the `gpt-image-` family, including legacy Responses chat models, are replaced with the configured default image model.
+- `model`: GPT Image model override for the standalone Codex Images API, for example `gpt-image-2.6`, `gpt-image-2.5`, or `gpt-image-2`. Values outside the `gpt-image-` family, including legacy Responses chat models, are replaced with the configured default image model.
 - `outputFormat`: `png`, `jpeg`, or `webp`. Codex returns PNG and the extension converts other formats locally.
 - `save`: `project`, `global`, `custom`, or `none`.
 - `saveDir`: required for `save: "custom"` unless `PI_IMAGE_SAVE_DIR` is set.

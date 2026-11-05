@@ -226,6 +226,13 @@ describe("registerOpenAILive", () => {
     const captured: CapturedCustom = { component: undefined, tui: makeFakeTui() };
     const custom = makeCustomMock(captured);
     const ctx = makeContext(custom);
+    ctx.model = { provider: "openai", id: "gpt-6.1-sol" } as ExtensionContext["model"];
+    const getApiKeyForProvider = vi.fn(async (provider: string) =>
+      provider === "openai-codex"
+        ? JSON.stringify({ access: "voice-codex-access", accountId: "acct_voice" })
+        : "direct-openai-access",
+    );
+    ctx.modelRegistry.getApiKeyForProvider = getApiKeyForProvider;
 
     const run = commandFrom(harness).handler("", ctx);
     await vi.waitFor(() => {
@@ -238,6 +245,11 @@ describe("registerOpenAILive", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]!.options.voice).toBe("vale");
     expect(sessions[0]!.options.sessionId).toBe("session-7");
+    await expect(sessions[0]!.options.getCredentials()).resolves.toMatchObject({
+      accessToken: "voice-codex-access",
+      accountId: "acct_voice",
+    });
+    expect(getApiKeyForProvider).toHaveBeenCalledExactlyOnceWith("openai-codex");
     expect(sessions[0]!.start).toHaveBeenCalledOnce();
     expect(sessions[0]!.stop).toHaveBeenCalledOnce();
     expect(arbiter.arbiter.leave).toHaveBeenCalledOnce();

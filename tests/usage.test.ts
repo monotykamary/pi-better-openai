@@ -34,6 +34,7 @@ function writeCodexAuth(agentDir: string, expires?: number): void {
     join(agentDir, "auth.json"),
     `${JSON.stringify(
       {
+        openai: { type: "oauth", access: "direct-openai-access", expires: Date.now() + 3600000 },
         "openai-codex": {
           type: "oauth",
           access: "usage-access",
@@ -571,10 +572,19 @@ describe("usage polling lifecycle", () => {
     ]);
   });
 
-  test.each(["openai", "openai-codex"])(
-    "labels the Codex quota source for %s models",
-    async (provider) => {
-      const fetchMock = stubUsageFetch(usageJsonResponse);
+  test.each([
+    { provider: "openai", id: "gpt-6-astra" },
+    { provider: "openai", id: "gpt-6.1-sol" },
+    { provider: "openai-codex", id: "gpt-5.5" },
+  ])(
+    "keeps Codex usage and banked resets visible for $provider/$id with both logins",
+    async ({ provider, id }) => {
+      const fetchMock = stubUsageFetch(() =>
+        Response.json({
+          ...usageResponseBody(),
+          rate_limit_reset_credits: { available_count: 2 },
+        }),
+      );
       const harness = await createUsageHarness({
         usageConfig: {
           enabled: true,
@@ -582,7 +592,7 @@ describe("usage polling lifecycle", () => {
           showOnlyOnSubscriptionModels: true,
           showResetTimes: false,
         },
-        model: { provider, id: "gpt-5.5" } as ExtensionContext["model"],
+        model: { provider, id } as ExtensionContext["model"],
         isUsingOAuth: true,
       });
 
@@ -605,6 +615,20 @@ describe("usage polling lifecycle", () => {
       );
       expect(widget.render(200)[0]).toContain("Usage:");
       expect(widget.render(200)[0]).toContain("5h: 90%");
+      expect(widget.render(200)[0]).toContain("2 banked resets");
+      expect(vi.mocked(harness.ctx.ui.setWidget).mock.calls.at(-1)?.[2]).toEqual({
+        placement: "belowEditor",
+      });
+      for (const [, init] of fetchMock.mock.calls as unknown as [string, RequestInit][]) {
+        expect(init.headers).toMatchObject({
+          authorization: "Bearer usage-access",
+          "chatgpt-account-id": "acct_usage",
+        });
+      }
+      expect(vi.mocked(harness.ctx.modelRegistry.getApiKeyForProvider).mock.calls).toEqual([
+        ["openai-codex"],
+        ["openai-codex"],
+      ]);
       expect(colorCalls).toContainEqual(["success", "90%"]);
       expect(colorCalls).toContainEqual(["dim", "Usage: "]);
       if (provider === "openai") expect(widget.render(200)[0]).toContain("Codex Usage:");
@@ -833,75 +857,79 @@ function widgetLine(harness: UsageHarness): string {
 }
 
 describe("multiprovider resume", () => {
-  test("repaints usage with the account a resumed session restores", async () => {
-    // Usage is account-scoped: the upstream credential and the pooled account
-    // report different numbers, so the widget line identifies who was charged.
-    const fetchMock = vi.fn((_url: unknown, init?: RequestInit) => {
-      const headers = (init?.headers ?? {}) as Record<string, string>;
-      const accountId = String(headers["chatgpt-account-id"] ?? "");
-      const usedPercent = accountId === "acct_pinned" ? 70 : 10;
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
-            rate_limit: {
-              allowed: true,
-              primary_window: { used_percent: usedPercent, reset_after_seconds: 60 },
-              secondary_window: { used_percent: usedPercent, reset_after_seconds: 3600 },
-            },
-          }),
-        ),
+  test.each(["openai", "openai-codex"])(
+    "repaints restored Codex account usage while chatting with %s",
+    async (provider) => {
+      // Usage is account-scoped: the upstream credential and the pooled account
+      // report different numbers, so the widget line identifies who was charged.
+      const fetchMock = vi.fn((_url: unknown, init?: RequestInit) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        const accountId = String(headers["chatgpt-account-id"] ?? "");
+        const usedPercent = accountId === "acct_pinned" ? 70 : 10;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              rate_limit: {
+                allowed: true,
+                primary_window: { used_percent: usedPercent, reset_after_seconds: 60 },
+                secondary_window: { used_percent: usedPercent, reset_after_seconds: 3600 },
+              },
+            }),
+          ),
+        );
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const harness = await createUsageHarness({
+        usageConfig: {
+          enabled: true,
+          refreshIntervalMs: 60000,
+          showOnlyOnSubscriptionModels: true,
+          showResetTimes: false,
+        },
+        model: {
+          provider,
+          id: "gpt-5.6-sol",
+        } as unknown as ExtensionContext["model"],
+        isUsingOAuth: true,
+      });
+      await settleAsyncWork();
+
+      const service = fakeMultiproviderService();
+      harness.publishService(service.value);
+
+      // Resuming runs this extension's session_start before pi-multiprovider has
+      // replayed the session's switch journal, so the first paint shows the
+      // upstream account.
+      await emit(harness, "session_start");
+      await vi.waitFor(() => expect(widgetLine(harness)).toContain("5h: 90%"));
+
+      // The replay then restores the account and tells followers about it.
+      service.resolve(async () => ({
+        accessToken: codexJwt("acct_pinned"),
+        label: "Work",
+        source: "Work · Codex OAuth",
+      }));
+      service.notifyAccountChanged({
+        providerId: "openai-codex",
+        account: { id: "acct_pinned", label: "Work", authKind: "oauth" },
+        ctx: harness.ctx,
+      });
+
+      await vi.waitFor(() => expect(widgetLine(harness)).toContain("5h: 30%"));
+      expect(service.resolveActiveAccountAuth).toHaveBeenCalledWith(
+        "openai-codex",
+        harness.ctx,
+        expect.anything(),
       );
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const harness = await createUsageHarness({
-      usageConfig: {
-        enabled: true,
-        refreshIntervalMs: 60000,
-        showOnlyOnSubscriptionModels: true,
-        showResetTimes: false,
-      },
-      model: {
-        provider: "openai-codex",
-        id: "gpt-5.6-sol",
-      } as unknown as ExtensionContext["model"],
-      isUsingOAuth: true,
-    });
-    await settleAsyncWork();
-
-    const service = fakeMultiproviderService();
-    harness.publishService(service.value);
-
-    // Resuming runs this extension's session_start before pi-multiprovider has
-    // replayed the session's switch journal, so the first paint shows the
-    // upstream account.
-    await emit(harness, "session_start");
-    await vi.waitFor(() => expect(widgetLine(harness)).toContain("5h: 90%"));
-
-    // The replay then restores the account and tells followers about it.
-    service.resolve(async () => ({
-      accessToken: codexJwt("acct_pinned"),
-      label: "Work",
-      source: "Work · Codex OAuth",
-    }));
-    service.notifyAccountChanged({
-      providerId: "openai-codex",
-      account: { id: "acct_pinned", label: "Work", authKind: "oauth" },
-      ctx: harness.ctx,
-    });
-
-    await vi.waitFor(() => expect(widgetLine(harness)).toContain("5h: 30%"));
-    expect(service.resolveActiveAccountAuth).toHaveBeenCalledWith(
-      "openai-codex",
-      harness.ctx,
-      expect.anything(),
-    );
-    expect(
-      fetchMock.mock.calls.some(
-        ([, init]) =>
-          ((init?.headers ?? {}) as Record<string, string>)["chatgpt-account-id"] === "acct_pinned",
-      ),
-    ).toBe(true);
-    await emit(harness, "session_shutdown");
-  });
+      expect(
+        fetchMock.mock.calls.some(
+          ([, init]) =>
+            ((init?.headers ?? {}) as Record<string, string>)["chatgpt-account-id"] ===
+            "acct_pinned",
+        ),
+      ).toBe(true);
+      await emit(harness, "session_shutdown");
+    },
+  );
 });

@@ -230,9 +230,9 @@ export const DEFAULT_FOOTER_CONFIG: Required<FooterConfig> = {
   mode: "replace",
 };
 
-export const IMAGE_MODEL_CHOICES = ["gpt-image-2.5", "gpt-image-2"] as const;
+export const IMAGE_MODEL_CHOICES = ["gpt-image-2.6", "gpt-image-2.5", "gpt-image-2"] as const;
 
-export const DEFAULT_IMAGE_MODEL = "gpt-image-2.5";
+export const DEFAULT_IMAGE_MODEL = "gpt-image-2.6";
 
 export const DEFAULT_IMAGE_CONFIG: Required<ImageConfig> = {
   enabled: true,
