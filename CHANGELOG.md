@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5
+
+- Default Codex subscription image generation to `gpt-image-2.6`, verified with a live generation. Keep `gpt-image-2.5` and `gpt-image-2` selectable and preserve explicit model settings.
+- Verify dual-login workflows: keep an `openai/*` chat model selected while images, web search, live voice, usage, and banked resets resolve the independent `openai-codex` account.
+- Expand regression coverage for Codex usage and banked-reset counts in the below-editor widget, confirmed and automatic reset redemption, and pooled Codex account selection without substituting OpenAI credentials.
+
 ## 0.3.3
 
 - Add GPT-6.1 Terra to native OpenAI and legacy Codex model catalogs while preserving host authentication, transports, classifiers, and authoritative metadata. Use the documented 1.05M context for OpenAI and a conservative 272K context for Codex.
