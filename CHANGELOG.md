@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.6
+
+- Add the official `gpt-6-cyber` model as a native OpenAI Responses fallback, preserving host authentication, transports, classifiers, and authoritative catalog metadata.
+- Document Daybreak Red approval requirements and keep the existing Daybreak aliases, Codex fallbacks, and Fast/Ultrafast eligibility unchanged.
+- Cover Cyber metadata, catalog precedence, authentication preservation, and unsupported service tiers with regression tests.
+- Live Cyber access remains unverified: the tested ChatGPT subscription route was unsupported, and the tested API project returned `model_not_found`. Release the catalog integration without claiming account entitlement.
+
 ## 0.3.5
 
 - Default Codex subscription image generation to `gpt-image-2.6`, verified with a live generation. Keep `gpt-image-2.5` and `gpt-image-2` selectable and preserve explicit model settings.
