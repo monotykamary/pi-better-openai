@@ -252,6 +252,25 @@ Example tool input:
 - Probabilities and confidence remain uncertain judgments; scores retain their provider-specific scale. No claim of cross-provider calibration is made. Decisions never authorize tools, execute commands, change the active model, or start background polling.
 - Reported classifier token usage/cost is included in tool results and the Better OpenAI footer. Missing usage or catalog pricing is not evidence that a request was free.
 
+## GPT-6 Cyber
+
+The official model ID is **`gpt-6-cyber`**, exposed here as **`openai/gpt-6-cyber`**. After reloading the extension, select it with:
+
+```text
+/reload
+/model openai/gpt-6-cyber
+```
+
+[OpenAI's model documentation](https://developers.openai.com/api/docs/models/gpt-6-cyber) requires **Daybreak Red access and approval for your organization**. Use the credentials and project provisioned for that access. The extension preserves Pi's native OpenAI authentication and Responses transport; appearing in the picker does not prove entitlement, and a normal ChatGPT subscription alone does not establish access.
+
+**Live validation status:** the tested ChatGPT subscription route rejected this model, and the tested API project returned `model_not_found`. No successful live Cyber response has been verified for this release. Configure an API key from a project approved for GPT-6 Cyber; do not assume the existing ChatGPT login grants access.
+
+The fallback declares text/image input, a 1.05M context window, and 128K maximum output. Published standard short-context prices per million tokens are $20 input, $100 output, $2 cached input, and $25 for 30-minute cache writes. Fallback cost estimates use these short-context rates; do not treat them as verified long-context billing. Extended reasoning levels (`xhigh`/`max`) remain disabled until model-specific support is confirmed. Host catalog metadata takes precedence when available.
+
+Follow the [Daybreak setup guide](https://developers.openai.com/api/docs/guides/daybreak#set-up-gpt-6-cyber) for project access, SSO/MFA, IP allowlisting, and any required request settings, including a stable pseudonymous safety identifier. This model registration does not inject or override access-program selections or safety identifiers.
+
+This is a separate model entry: the extension does **not** rename or redirect `gpt-daybreak-red-latest`. It does not add an unverified `openai-codex/gpt-6-cyber` fallback or enable Fast/Ultrafast by default for Cyber.
+
 ## GPT-6.1 Terra and model fallbacks
 
 After `/reload`, select `/model openai/gpt-6.1-terra` with your existing `/login openai` subscription or API key. The extension adds Terra when it is missing from the host catalog, without replacing native transport, authentication, other chat models, or classifiers. Host catalog metadata takes precedence. Model visibility does not guarantee account entitlement.

@@ -2,7 +2,7 @@ import { createModels, InMemoryCredentialStore, type Provider } from "@earendil-
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test, vi } from "vitest";
-import { OPENAI_TERRA_MODEL, withOpenAIModels } from "../src/openai-models.ts";
+import { OPENAI_CYBER_MODEL, OPENAI_TERRA_MODEL, withOpenAIModels } from "../src/openai-models.ts";
 import {
   OPENAI_DECISIONS_MODEL,
   registerOpenAIDecisionsProvider,
@@ -10,6 +10,85 @@ import {
 import { CODEX_MODEL_FALLBACKS, createOpenAICodexProvider } from "../src/codex-models.ts";
 
 const native = () => builtinProviders().find((provider) => provider.id === "openai")!;
+
+describe("GPT-6 Cyber", () => {
+  test("uses the published model ID and Responses metadata without changing Daybreak aliases", () => {
+    expect(OPENAI_CYBER_MODEL).toMatchObject({
+      id: "gpt-6-cyber",
+      name: "GPT-6 Cyber",
+      provider: "openai",
+      api: "openai-responses",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: true,
+      thinkingLevelMap: { off: null, minimal: "low", xhigh: null, max: null },
+      contextWindow: 1050000,
+      maxTokens: 128000,
+      input: ["text", "image"],
+      cost: { input: 20, output: 100, cacheRead: 2, cacheWrite: 25 },
+    });
+    expect(CODEX_MODEL_FALLBACKS.some((model) => model.id === OPENAI_CYBER_MODEL.id)).toBe(false);
+    expect(
+      CODEX_MODEL_FALLBACKS.find((model) => model.id === "gpt-daybreak-red-latest"),
+    ).toMatchObject({
+      name: "Daybreak Red",
+      cost: { input: 12.5, output: 75 },
+    });
+  });
+
+  test("keeps native transports and refreshed metadata authoritative without duplicates", () => {
+    const base = native();
+    let chat = base.getModels().filter((model) => model.id !== OPENAI_CYBER_MODEL.id);
+    const provider = withOpenAIModels({ ...base, getModels: () => chat, getAllModels: undefined });
+    expect(provider.getModels().filter((model) => model.id === OPENAI_CYBER_MODEL.id)).toEqual([
+      OPENAI_CYBER_MODEL,
+    ]);
+    expect(provider.getAllModels!().filter((model) => model.id === OPENAI_CYBER_MODEL.id)).toEqual([
+      OPENAI_CYBER_MODEL,
+    ]);
+    expect(provider.stream).toBe(base.stream);
+    expect(provider.auth).toBe(base.auth);
+    const official = { ...OPENAI_CYBER_MODEL, name: "Official Cyber", contextWindow: 1200000 };
+    chat = [...chat, official];
+    expect(provider.getModels().filter((model) => model.id === official.id)).toEqual([official]);
+    expect(provider.getAllModels!().filter((model) => model.id === official.id)).toEqual([
+      official,
+    ]);
+  });
+
+  test("does not let a same-ID classifier hide the Cyber chat fallback", () => {
+    const base = native();
+    const classifier = { ...OPENAI_DECISIONS_MODEL, id: OPENAI_CYBER_MODEL.id };
+    const provider = withOpenAIModels({ ...base, getAllModels: () => [classifier] });
+    expect(provider.getAllModels!()).toEqual([classifier, OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL]);
+  });
+
+  test.each(["api_key", "oauth"] as const)(
+    "registers with native %s auth without modifying credentials",
+    async (type) => {
+      const credentials = new InMemoryCredentialStore();
+      const credential =
+        type === "api_key"
+          ? { type, key: "synthetic-api-key" }
+          : {
+              type,
+              access: "synthetic-access",
+              refresh: "synthetic-refresh",
+              expires: Date.now() + 60000,
+            };
+      await credentials.modify("openai", async () => credential);
+      const registry = createModels({ credentials });
+      const registerProvider = vi.fn((provider: Provider) => registry.setProvider(provider));
+      registerOpenAIDecisionsProvider({ registerProvider } as unknown as ExtensionAPI);
+      expect(
+        (await registry.getAvailableOfType("chat", "openai")).filter(
+          (model) => model.id === OPENAI_CYBER_MODEL.id,
+        ),
+      ).toHaveLength(1);
+      expect(await credentials.read("openai")).toEqual(credential);
+      expect(registry.getModelOfType("classifier", "openai-decisions", "gpt-6-luna")).toBeDefined();
+    },
+  );
+});
 
 describe("GPT-6.1 Terra", () => {
   test("uses published Responses metadata and conservative Codex context", () => {
@@ -47,8 +126,8 @@ describe("GPT-6.1 Terra", () => {
     let chat = base.getModels().filter((model) => model.id !== OPENAI_TERRA_MODEL.id);
     let all = base.getAllModels!().filter((model) => model.id !== OPENAI_TERRA_MODEL.id);
     const provider = withOpenAIModels({ ...base, getModels: () => chat, getAllModels: () => all });
-    expect(provider.getModels()).toEqual([...chat, OPENAI_TERRA_MODEL]);
-    expect(provider.getAllModels!()).toEqual([...all, OPENAI_TERRA_MODEL]);
+    expect(provider.getModels()).toEqual([...chat, OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL]);
+    expect(provider.getAllModels!()).toEqual([...all, OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL]);
     for (const key of [
       "auth",
       "stream",
@@ -74,7 +153,7 @@ describe("GPT-6.1 Terra", () => {
     const base = native();
     const classifier = { ...OPENAI_DECISIONS_MODEL, id: OPENAI_TERRA_MODEL.id };
     const provider = withOpenAIModels({ ...base, getAllModels: () => [classifier] });
-    expect(provider.getAllModels!()).toEqual([classifier, OPENAI_TERRA_MODEL]);
+    expect(provider.getAllModels!()).toEqual([classifier, OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL]);
   });
 
   test("registers Terra alongside Decisions and makes it available with subscription auth", async () => {

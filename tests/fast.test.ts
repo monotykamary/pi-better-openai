@@ -131,6 +131,16 @@ afterEach(() => {
 });
 
 describe("service tiers", () => {
+  test.each(["fast", "ultrafast"])(
+    "does not inject an unverified %s tier for GPT-6 Cyber",
+    async (serviceTier) => {
+      const cwd = createTempProject();
+      writeProjectConfig(cwd, { serviceTier, supportedModels: undefined });
+      const h = createHarness(cwd, createModel("openai", "gpt-6-cyber"));
+      await emit(h, "session_start");
+      expect(await beforeProviderRequest(h, { model: "gpt-6-cyber" })).toBeUndefined();
+    },
+  );
   test.each(["gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])(
     "enables Fast by default for Codex %s",
     async (id) => {

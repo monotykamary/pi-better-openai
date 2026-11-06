@@ -28,20 +28,43 @@ export const OPENAI_TERRA_MODEL: Model<"openai-responses"> = {
   },
 };
 
+// https://developers.openai.com/api/docs/models/gpt-6-cyber
+// Requires organization approval through Daybreak Red; registration grants no access.
+export const OPENAI_CYBER_MODEL: Model<"openai-responses"> = {
+  id: "gpt-6-cyber",
+  name: "GPT-6 Cyber",
+  api: "openai-responses",
+  provider: "openai",
+  baseUrl: "https://api.openai.com/v1",
+  reasoning: true,
+  // Keep extended efforts disabled until documented; native catalog metadata wins.
+  thinkingLevelMap: { off: null, minimal: "low", xhigh: null, max: null },
+  input: ["text", "image"],
+  contextWindow: 1050000,
+  maxTokens: 128000,
+  // Published standard short-context rates, including 30-minute cache writes.
+  cost: { input: 20, output: 100, cacheRead: 2, cacheWrite: 25 },
+  compat: {
+    supportsStrictMode: true,
+    supportsToolSearch: true,
+  },
+};
+
 export function withOpenAIModels(builtIn: Provider): Provider {
-  const appendTerra = <T extends { id: string; type?: string }>(
+  const appendMissing = <T extends { id: string; type?: string }>(
     models: readonly T[],
-  ): readonly (T | typeof OPENAI_TERRA_MODEL)[] =>
-    models.some(
-      (model) => model.id === OPENAI_TERRA_MODEL.id && (!model.type || model.type === "chat"),
-    )
-      ? models
-      : [...models, OPENAI_TERRA_MODEL];
+  ): readonly (T | Model<"openai-responses">)[] => {
+    const missing = [OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL].filter(
+      (fallback) =>
+        !models.some((model) => model.id === fallback.id && (!model.type || model.type === "chat")),
+    );
+    return missing.length > 0 ? [...models, ...missing] : models;
+  };
   // Read the host's current catalog on every call so refreshes remain authoritative.
   // Keep its transport, auth, classifier/image adapters, and filtering untouched.
   return {
     ...builtIn,
-    getModels: () => appendTerra(builtIn.getModels()),
-    getAllModels: () => appendTerra(builtIn.getAllModels?.() ?? builtIn.getModels()),
+    getModels: () => appendMissing(builtIn.getModels()),
+    getAllModels: () => appendMissing(builtIn.getAllModels?.() ?? builtIn.getModels()),
   };
 }
