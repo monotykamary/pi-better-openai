@@ -3,11 +3,10 @@ import { Text } from "@earendil-works/pi-tui";
 import { getCodexCredentials } from "../codex-auth.ts";
 import type { ResolvedConfig } from "../config.ts";
 import { sanitizeDiagnosticError } from "../format.ts";
-import {
-  LiveSessionController,
-  type LiveSessionControllerOptions,
-  type LiveTranscript,
-} from "./controller.ts";
+// The session controller pulls the realtime transport (ws, undici, proxy
+// agents) and WebRTC glue. It is only needed once `/live` actually starts, so
+// it loads on first start instead of at extension registration.
+import type { LiveSessionControllerOptions, LiveTranscript } from "./controller.ts";
 import { attachFocusReporting, probeFocusReporting, type FocusTerminalHandle } from "./focus.ts";
 import {
   LIVE_QUEUE_TICK_MS,
@@ -101,8 +100,13 @@ export function registerOpenAILive(
   getConfig: (ctx: ExtensionContext) => ResolvedConfig,
   dependencies: LiveRegistrationDependencies = {},
 ): { isActive(): boolean; stop(): Promise<void> } {
-  const createSession =
-    dependencies.createSession ?? ((options) => new LiveSessionController(options));
+  let createSession: LiveSessionFactory | undefined = dependencies.createSession;
+  const loadSessionFactory = async (): Promise<LiveSessionFactory> => {
+    if (createSession) return createSession;
+    const { LiveSessionController } = await import("./controller.ts");
+    createSession = (options) => new LiveSessionController(options);
+    return createSession;
+  };
   const createArbiter: LiveArbiterFactory =
     dependencies.createArbiter ??
     ((options, callbacks) => new LiveFloorArbiter(options, callbacks));
@@ -134,6 +138,14 @@ export function registerOpenAILive(
       return;
     }
     if (settling) await settling;
+
+    let createLiveSession: LiveSessionFactory;
+    try {
+      createLiveSession = await loadSessionFactory();
+    } catch (cause) {
+      ctx.ui.notify(sanitizeDiagnosticError(errorFrom(cause).message), "error");
+      return;
+    }
 
     const result = await ctx.ui.custom<LiveUiResult>((tui, theme, _keybindings, done) => {
       let completed = false;
@@ -176,7 +188,7 @@ export function registerOpenAILive(
       const activateSession = () => {
         if (completed || session) return;
         sessionParked = false;
-        const created = createSession({
+        const created = createLiveSession({
           sessionId: ctx.sessionManager.getSessionId(),
           voice: cfg.live.voice,
           getCredentials: (signal) => getCodexCredentials(ctx, signal),

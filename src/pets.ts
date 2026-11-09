@@ -13,7 +13,7 @@ import {
   type AutocompleteItem,
   type ImageTheme,
 } from "@earendil-works/pi-tui";
-import sharp from "sharp";
+import { loadSharp } from "./sharp.ts";
 import { isRecord, type PetState } from "./config.ts";
 
 const PETS_COMMAND = "pets";
@@ -201,6 +201,7 @@ async function validatePetSpritesheet(
   }
 
   try {
+    const sharp = await loadSharp();
     const metadata = await sharp(resolvedSpritesheetPath, { animated: false }).metadata();
     if (metadata.width !== EXPECTED_ATLAS_WIDTH || metadata.height !== EXPECTED_ATLAS_HEIGHT) {
       return `invalid atlas dimensions: ${metadata.width ?? "?"}x${metadata.height ?? "?"}; expected ${EXPECTED_ATLAS_WIDTH}x${EXPECTED_ATLAS_HEIGHT}`;
@@ -511,6 +512,7 @@ export async function loadCodexPet(
   const spritesheetPath = resolvePetAssetPath(pet.dir, pet.spritesheetPath);
   if (!spritesheetPath)
     throw new Error(`Invalid spritesheetPath outside pet folder: ${pet.spritesheetPath}`);
+  const sharp = await loadSharp();
   const source = sharp(spritesheetPath, { animated: false });
   const metadata = await source.metadata();
   if (metadata.width !== EXPECTED_ATLAS_WIDTH || metadata.height !== EXPECTED_ATLAS_HEIGHT) {
