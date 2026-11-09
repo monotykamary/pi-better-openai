@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.7
+
+- Load the image runtime, `sharp` and the live voice transport at first use instead of at extension load. Registration, commands and rendering are unchanged; fresh-process import time drops from about 87 ms to 61 ms.
+- A missing or broken `sharp` no longer prevents the extension from loading; only format conversion, input-image validation and pets report the failure.
+
 ## 0.3.6
 
 - Add the official `gpt-6-cyber` model as a native OpenAI Responses fallback, preserving host authentication, transports, classifiers, and authoritative catalog metadata.
