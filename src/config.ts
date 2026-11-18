@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { CONFIG_BASENAME, logPrefix } from "./identity.ts";
+import { editJsonObject } from "./json-file.ts";
 import {
   DEFAULT_LIVE_VOICE,
   isLiveVoice,
@@ -983,19 +984,37 @@ export function applySettingToRawConfig(
   return next;
 }
 
-export function writeConfig(path: string, config: ConfigFile | Record<string, unknown>): void {
+function editConfigFile(
+  path: string,
+  edit: (
+    current: Record<string, unknown> | undefined,
+  ) => ConfigFile | Record<string, unknown> | undefined,
+): boolean {
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    return editJsonObject(path, edit);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`${logPrefix()} Failed to write ${path}: ${message}`);
+    return false;
   }
+}
+
+export function updateConfig(
+  path: string,
+  edit: (current: Record<string, unknown>) => Record<string, unknown> | undefined,
+): boolean {
+  return editConfigFile(path, (current) => edit(current ?? {}));
+}
+
+export function writeConfig(path: string, config: ConfigFile | Record<string, unknown>): void {
+  editConfigFile(path, () => config);
 }
 
 function ensureConfigFile(projectConfigPath: string, globalConfigPath: string): void {
   if (existsSync(projectConfigPath) || existsSync(globalConfigPath)) return;
-  writeConfig(globalConfigPath, DEFAULT_CONFIG);
+  editConfigFile(globalConfigPath, (current) =>
+    current === undefined && !existsSync(projectConfigPath) ? DEFAULT_CONFIG : undefined,
+  );
 }
 
 export function resolveConfig(cwd: string): ResolvedConfig {

@@ -63,7 +63,7 @@ import {
   parseModels,
   readRawConfig,
   resolveConfig,
-  writeConfig,
+  updateConfig,
   applySettingToRawConfig,
 } from "./src/config.ts";
 import {
@@ -352,19 +352,20 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       serviceTier: fastController.desiredTier,
     };
     if (!nextConfig.persistState) return;
-    writeConfig(nextConfig.configPath, {
-      ...readRawConfig(nextConfig.configPath),
+    updateConfig(nextConfig.configPath, (current) => ({
+      ...current,
       active: fastController.active,
       desiredActive: fastController.desiredActive,
       serviceTier: fastController.desiredTier,
-    });
+    }));
   }
 
   function writePetConfig(ctx: ExtensionContext, patch: Record<string, unknown>): ResolvedConfig {
     const cfg = refresh(ctx);
-    const current = readRawConfig(cfg.configPath);
-    const pets = isRecord(current.pets) ? current.pets : {};
-    writeConfig(cfg.configPath, { ...current, pets: { ...pets, ...patch } });
+    updateConfig(cfg.configPath, (current) => ({
+      ...current,
+      pets: { ...(isRecord(current.pets) ? current.pets : {}), ...patch },
+    }));
     petController.invalidateLoadKey();
     return refresh(ctx);
   }
@@ -1043,7 +1044,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   function writeSetting(ctx: ExtensionContext, id: string, rawValue: string): void {
     const cfg = refresh(ctx);
-    const current = readRawConfig(cfg.configPath);
     const bool = rawValue === "true";
     if (id === "fast.enabled") {
       fastController.setDesired(ctx, cfg, bool);
@@ -1053,18 +1053,21 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       ctx.ui.notify(fastController.stateText(ctx, cfg), fastController.selectionNoticeLevel(ctx));
     }
     const petKey = id.startsWith("pets.") ? id.slice("pets.".length) : undefined;
-    const nextRawConfig = applySettingToRawConfig(current, id, rawValue, {
-      persistState: cfg.persistState,
-      active: fastController.active,
-      desiredActive: fastController.desiredActive,
-      serviceTier: fastController.desiredTier,
-      petEmptyValue: PET_EMPTY_VALUE,
+    updateConfig(cfg.configPath, (current) => {
+      const nextRawConfig = applySettingToRawConfig(current, id, rawValue, {
+        persistState: cfg.persistState,
+        active: fastController.active,
+        desiredActive: fastController.desiredActive,
+        serviceTier: fastController.desiredTier,
+        petEmptyValue: PET_EMPTY_VALUE,
+      });
+      if (id === "persistState" && bool) {
+        nextRawConfig.serviceTier = fastController.desiredTier;
+        nextRawConfig.active = fastController.active;
+        nextRawConfig.desiredActive = fastController.desiredActive;
+      }
+      return nextRawConfig;
     });
-    if (id === "persistState" && bool) {
-      nextRawConfig.serviceTier = fastController.desiredTier;
-      nextRawConfig.active = fastController.active;
-      nextRawConfig.desiredActive = fastController.desiredActive;
-    }
     if (petKey) {
       if (petKey === "enabled" || petKey === "sizeCells" || petKey === "slug")
         petController.invalidateLoadKey();
@@ -1073,7 +1076,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       if (petKey === "idleEmotes" || petKey === "idleEmoteIntervalMs")
         petController.stopIdleEmotes();
     }
-    writeConfig(cfg.configPath, nextRawConfig);
     const next = refresh(ctx);
     fastController.applyDesiredState(ctx, next);
     if (id === "pets.enabled" || id === "pets.sizeCells" || id === "pets.slug")

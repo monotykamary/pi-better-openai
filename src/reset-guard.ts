@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { publishJson, readJsonObject, resolveJsonPath } from "./json-file.ts";
 import { piAgentDir } from "./paths.ts";
 import { BANKED_RESET_AUTO_REDEEM_LEAD_MS } from "./resets.ts";
 
@@ -33,26 +34,27 @@ export function reserveBankedResetRedemption(
     throw new Error("Banked reset safety reservation unavailable.");
   }
   try {
+    let target: string;
     let previous: RedemptionReservation | undefined;
     try {
-      previous = JSON.parse(readFileSync(path, "utf8"));
+      target = resolveJsonPath(path);
+      previous = readJsonObject(target) as RedemptionReservation | undefined;
       if (
-        !previous ||
-        typeof previous.blockedUntilMs !== "number" ||
-        !Number.isFinite(previous.blockedUntilMs) ||
-        typeof previous.creditHash !== "string" ||
-        !/^[0-9a-f]{64}$/.test(previous.creditHash) ||
-        (previous.attemptedCreditHashes !== undefined &&
-          (!Array.isArray(previous.attemptedCreditHashes) ||
-            !previous.attemptedCreditHashes.every(
-              (hash) => typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash),
-            ) ||
-            !previous.attemptedCreditHashes.includes(previous.creditHash)))
+        previous &&
+        (typeof previous.blockedUntilMs !== "number" ||
+          !Number.isFinite(previous.blockedUntilMs) ||
+          typeof previous.creditHash !== "string" ||
+          !/^[0-9a-f]{64}$/.test(previous.creditHash) ||
+          (previous.attemptedCreditHashes !== undefined &&
+            (!Array.isArray(previous.attemptedCreditHashes) ||
+              !previous.attemptedCreditHashes.every(
+                (hash) => typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash),
+              ) ||
+              !previous.attemptedCreditHashes.includes(previous.creditHash))))
       )
         throw new Error("Invalid reservation");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        throw new Error("Banked reset safety reservation unavailable.");
+    } catch {
+      throw new Error("Banked reset safety reservation unavailable.");
     }
     // Check the actual clock under the account lock, not a cached timer's time.
     // Manual, explicitly confirmed redemptions do not supply an expiry limit.
@@ -71,18 +73,25 @@ export function reserveBankedResetRedemption(
       previous?.attemptedCreditHashes ?? (previous ? [previous.creditHash] : []);
     if ((previous && previous.blockedUntilMs > now) || attemptedCreditHashes.includes(creditHash))
       return false;
-    writeFileSync(
-      path,
-      JSON.stringify({
-        blockedUntilMs: now + BANKED_RESET_AUTO_REDEEM_LEAD_MS,
-        creditHash,
-        attemptedCreditHashes: [...attemptedCreditHashes, creditHash],
-      }),
-      { mode: 0o600, flush: true },
-    );
-    return true;
+    try {
+      publishJson(
+        target,
+        JSON.stringify({
+          blockedUntilMs: now + BANKED_RESET_AUTO_REDEEM_LEAD_MS,
+          creditHash,
+          attemptedCreditHashes: [...attemptedCreditHashes, creditHash],
+        }),
+        { flush: true },
+      );
+      return true;
+    } catch {
+      throw new Error("Banked reset safety reservation unavailable.");
+    }
   } finally {
-    closeSync(fd);
-    unlinkSync(lock);
+    try {
+      closeSync(fd);
+    } finally {
+      unlinkSync(lock);
+    }
   }
 }

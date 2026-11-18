@@ -4,8 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   isRecord,
   parseModelKey,
-  readRawConfig,
-  writeConfig,
+  updateConfig,
   type DecisionsConfig,
   type ResolvedConfig,
 } from "./config.ts";
@@ -341,11 +340,10 @@ export function registerOpenAIDecisions(
 
   function save(ctx: ExtensionContext, patch: DecisionsConfig): void {
     const cfg = refreshConfig(ctx);
-    const raw = readRawConfig(cfg.configPath);
-    writeConfig(cfg.configPath, {
+    updateConfig(cfg.configPath, (raw) => ({
       ...raw,
       decisions: { ...(isRecord(raw.decisions) ? raw.decisions : {}), ...patch },
-    });
+    }));
     tool.setEnabled(refreshConfig(ctx).decisions.enabled);
   }
 

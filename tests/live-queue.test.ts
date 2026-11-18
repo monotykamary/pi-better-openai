@@ -1,7 +1,16 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { execFile } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   defaultIsProcessAlive,
   LIVE_QUEUE_STALE_MS,
@@ -77,6 +86,77 @@ describe("LiveFloorArbiter", () => {
     expect(alpha.arbiter.hasFloor).toBe(true);
     expect(alpha.events.activations).toEqual(["background"]);
   });
+
+  test("concurrent background starters publish one complete floor claim without replacing it", async () => {
+    const h = harness();
+    const start = join(h.directory, "start");
+    const moduleUrl = new URL("../src/live/queue.ts", import.meta.url).href;
+    const source = `
+      import { existsSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      import { LiveFloorArbiter } from ${JSON.stringify(moduleUrl)};
+      const { QUEUE_DIR: directory, QUEUE_SESSION: sessionId, QUEUE_START: start } = process.env;
+      const arbiter = new LiveFloorArbiter(
+        { directory, sessionId, pid: process.pid, policy: "focus", cwd: directory,
+          isProcessAlive: () => true },
+        { onActivated() {}, onDeactivated() {} },
+      );
+      writeFileSync(join(directory, sessionId), "");
+      const cell = new Int32Array(new SharedArrayBuffer(4));
+      const deadline = performance.now() + 5000;
+      while (!existsSync(start)) {
+        if (performance.now() > deadline) process.exit(2);
+        Atomics.wait(cell, 0, 0, 10);
+      }
+      arbiter.join();
+      console.log(JSON.stringify({ id: arbiter.id, hasFloor: arbiter.hasFloor }));
+    `;
+    const sessions = Array.from({ length: 4 }, (_, index) => `starter-${index}`);
+    const finished = Promise.all(
+      sessions.map(
+        (session) =>
+          new Promise<{ error: Error | null; stdout: string }>((done) => {
+            execFile(
+              "bun",
+              ["--eval", source],
+              {
+                timeout: 8000,
+                env: {
+                  PATH: process.env.PATH,
+                  QUEUE_DIR: h.directory,
+                  QUEUE_SESSION: session,
+                  QUEUE_START: start,
+                },
+              },
+              (error, stdout) => done({ error, stdout }),
+            );
+          }),
+      ),
+    );
+    let results: Awaited<typeof finished>;
+    try {
+      await vi.waitFor(
+        () =>
+          expect(sessions.every((session) => existsSync(join(h.directory, session)))).toBe(true),
+        { timeout: 3000 },
+      );
+    } finally {
+      writeFileSync(start, "");
+      results = await finished;
+    }
+    const winners = results
+      .map(({ error, stdout }) => {
+        expect(error).toBeNull();
+        return JSON.parse(stdout) as { id: string; hasFloor: boolean };
+      })
+      .filter((result) => result.hasFloor);
+    expect(winners).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(h.directory, "floor.json"), "utf8"))).toMatchObject({
+      holderId: winners[0]?.id,
+      token: expect.any(String),
+    });
+    expect(readdirSync(h.directory).filter((file) => file.endsWith(".tmp"))).toEqual([]);
+  }, 10_000);
 
   test("grants the floor to the oldest member only under fifo", () => {
     const h = harness();

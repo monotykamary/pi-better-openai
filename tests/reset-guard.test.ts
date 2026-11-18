@@ -1,6 +1,14 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  linkSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -62,6 +70,27 @@ describe("due-only durable reservations", () => {
       digest("second"),
     ]);
   });
+
+  test.skipIf(process.platform === "win32")(
+    "replaces the durable inode without mutating old readers",
+    () => {
+      vi.useFakeTimers();
+      expect(reserveBankedResetRedemption("fake-account", "first")).toBe(true);
+      const hash = createHash("sha256").update("fake-account").digest("hex");
+      const dir = join(agentDir, "pi-better-openai", "reset-redemptions");
+      const path = join(dir, `${hash}.json`);
+      const snapshot = join(dir, "old-inode");
+      linkSync(path, snapshot);
+      const first = readFileSync(path, "utf8");
+
+      vi.advanceTimersByTime(LEAD_MS);
+      expect(reserveBankedResetRedemption("fake-account", "second")).toBe(true);
+      expect(readFileSync(snapshot, "utf8")).toBe(first);
+      expect(JSON.parse(readFileSync(path, "utf8")).attemptedCreditHashes).toHaveLength(2);
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(readdirSync(dir).sort()).toEqual([`${hash}.json`, "old-inode"].sort());
+    },
+  );
 
   test("fails closed on malformed attempt history", () => {
     vi.useFakeTimers();

@@ -1,15 +1,7 @@
 import { randomBytes } from "node:crypto";
-import {
-  closeSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
+import { publishJson } from "../json-file.ts";
 import { piAgentDir } from "../paths.ts";
 
 // Cross-process floor arbitration for /live. Every enrolled pi process drops a
@@ -157,12 +149,6 @@ function readJson(file: string): unknown {
   }
 }
 
-function writeJsonAtomic(file: string, value: unknown): void {
-  const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value));
-  renameSync(tmp, file);
-}
-
 export class LiveFloorArbiter implements LiveFloorArbiterLike {
   readonly #directory: string;
   readonly #memberFile: string;
@@ -259,7 +245,7 @@ export class LiveFloorArbiter implements LiveFloorArbiterLike {
       heartbeatAt: this.#now(),
     };
     try {
-      writeJsonAtomic(this.#memberFile, member);
+      publishJson(this.#memberFile, JSON.stringify(member));
     } catch {
       // A wiped queue directory mid-run is recoverable on the next tick.
     }
@@ -357,16 +343,7 @@ export class LiveFloorArbiter implements LiveFloorArbiterLike {
       claimedAt: this.#now(),
     };
     try {
-      if (preempt) {
-        writeJsonAtomic(this.#floorFile, claim);
-      } else {
-        const fd = openSync(this.#floorFile, "wx");
-        try {
-          writeFileSync(fd, JSON.stringify(claim));
-        } finally {
-          closeSync(fd);
-        }
-      }
+      publishJson(this.#floorFile, JSON.stringify(claim), { exclusive: !preempt });
     } catch {
       return;
     }
