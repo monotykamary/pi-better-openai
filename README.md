@@ -18,6 +18,10 @@ Or install from npm:
 pi install npm:@monotykamary/pi-better-openai
 ```
 
+The npm package ships prebuilt JavaScript. Git installs and local checkouts also
+work without a build. Run `bun run build` after editing TypeScript if your local
+checkout already has a `dist/` directory, or remove `dist/` to load source again.
+
 ## Authentication
 
 Pi 1.0.2 supports **Sign in with ChatGPT** under `/login openai`, using the native Responses API at `api.openai.com`. Select `/model openai/gpt-6-astra` (or `openai/gpt-6.1-sol`) for that subscription login or an OpenAI API key; the extension preserves pi's native authentication and transport. Standard/Fast tier overrides work with both login methods on supported models.

@@ -4,9 +4,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Pass an installed package directory to run these same checks against a tarball.
+const root = resolve(process.argv[2] ?? resolve(dirname(fileURLToPath(import.meta.url)), ".."));
 const home = await mkdtemp(join(tmpdir(), "pi-extension-compat-"));
 const previousHome = process.env.PI_CODING_AGENT_DIR;
+const previousCodexHome = process.env.CODEX_HOME;
+process.env.CODEX_HOME = join(home, "codex");
 const previousFetch = globalThis.fetch;
 const previousDecisionsKey = process.env.OPENAI_DECISIONS_API_KEY;
 process.env.OPENAI_DECISIONS_API_KEY = "synthetic-decisions-key";
@@ -18,6 +21,7 @@ try {
     createAgentSession,
     createCodemodeExtension,
     DefaultResourceLoader,
+    initTheme,
     ModelRuntime,
     SessionManager,
     SettingsManager,
@@ -58,7 +62,11 @@ try {
   const loaded = resourceLoader.getExtensions();
   assert.deepEqual(loaded.errors, []);
   assert.deepEqual(loaded.warnings ?? [], []);
-  assert.ok(loaded.extensions.length > 0, "manifest entrypoints must load");
+  assert.equal(loaded.extensions.length, 1, "load exactly one manifest entrypoint");
+  assert.deepEqual(
+    loaded.runtime.pendingNativeProviderRegistrations.map(({ provider }) => provider.id),
+    ["openai-codex", "openai", "openai-decisions"],
+  );
   // Synthetic direct-OpenAI credentials only; never read the user's auth store.
   await writeFile(
     join(home, "auth.json"),
@@ -285,7 +293,54 @@ try {
     (await modelRuntime.getAuth("openai"))?.auth.apiKey,
     "synthetic-openai-subscription-token",
   );
+  // Exercise the split image runtime and Sharp's native codec through the registered tool.
+  const png =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://chatgpt.com/backend-api/codex/images/generations");
+    assert.equal(new Headers(init.headers).get("authorization"), "Bearer synthetic-image-token");
+    return Response.json({ data: [{ b64_json: png }], output_format: "png" });
+  };
+  const image = await loaded.extensions[0].tools
+    .get("openai_image")
+    .definition.execute(
+      "package-image-probe",
+      { prompt: "test image", outputFormat: "jpeg", save: "none" },
+      undefined,
+      undefined,
+      {
+        ...session.extensionRunner.createToolContext("package-image-probe", undefined),
+        modelRegistry: {
+          async getApiKeyForProvider(provider) {
+            assert.equal(provider, "openai-codex");
+            return JSON.stringify({ access: "synthetic-image-token", accountId: "synthetic" });
+          },
+        },
+      },
+    );
+  assert.equal(image.details.mimeType, "image/jpeg");
+  assert.equal(Buffer.from(image.details.data, "base64").subarray(0, 3).toString("hex"), "ffd8ff");
+
+  // Reach the deferred settings import and live controller without opening a TUI or audio device.
+  initTheme("dark");
   globalThis.fetch = async () => new Response("", { status: 503 });
+  const commandContext = session.extensionRunner.createCommandContext();
+  for (const name of ["openai-settings", "live"]) {
+    let opened = 0;
+    await commands.get(name).handler("", {
+      ...commandContext,
+      mode: "tui",
+      ui: {
+        ...commandContext.ui,
+        custom: async () => {
+          opened++;
+          return {};
+        },
+        notify: (message, level) => assert.notEqual(level, "error", message),
+      },
+    });
+    assert.equal(opened, 1, `${name}: deferred handler opened its UI`);
+  }
   await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
   assert.deepEqual(errors, [], "real session startup and shutdown must succeed");
   const names = new Set();
@@ -303,7 +358,7 @@ try {
     }
   }
   console.log(
-    `${manifest.name}: Pi ${VERSION} warning-free manifest load; ${loaded.extensions.length} extensions, ${names.size} tools registered; OpenAI auth isolation and native codemode text/image Decisions verified (mock HTTP)`,
+    `${manifest.name}: Pi ${VERSION} warning-free manifest load; 1 extension, ${names.size} tools registered; auth isolation, native Decisions, image conversion, settings and live imports verified`,
   );
 } finally {
   if (session) {
@@ -313,6 +368,8 @@ try {
   globalThis.fetch = previousFetch;
   if (previousDecisionsKey === undefined) delete process.env.OPENAI_DECISIONS_API_KEY;
   else process.env.OPENAI_DECISIONS_API_KEY = previousDecisionsKey;
+  if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = previousCodexHome;
   if (previousHome === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = previousHome;
   await rm(home, { recursive: true, force: true });

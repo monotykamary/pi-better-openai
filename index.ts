@@ -3,11 +3,11 @@
  *
  * Adds capability-gated OpenAI service tiers and opt-in native typed decisions.
  */
-import {
-  type ExtensionAPI,
-  type ExtensionContext,
-  type Theme,
-  type ThemeColor,
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  Theme,
+  ThemeColor,
 } from "@earendil-works/pi-coding-agent";
 import {
   Container,
