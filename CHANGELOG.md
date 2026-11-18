@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.8
 
 - Patch picomatch 4.0.7 against single-branch repeated-extglob ReDoS (GHSA-fc5q-39xc-vjpf), with bounded regression tests and source-hash verification before the advisory-specific audit exception. All other high-severity findings remain release blockers.
 
