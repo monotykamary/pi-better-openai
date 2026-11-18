@@ -50,11 +50,72 @@ export const OPENAI_CYBER_MODEL: Model<"openai-responses"> = {
   },
 };
 
+// https://developers.openai.com/api/docs/models/gpt-6.2-astra
+// https://developers.openai.com/api/docs/models/gpt-6.2-sol
+export const OPENAI_GPT_62_MODELS: readonly Model<"openai-responses">[] = [
+  {
+    id: "gpt-6.2-astra",
+    name: "GPT-6.2 Astra",
+    api: "openai-responses",
+    provider: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    reasoning: true,
+    thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh", max: "max" },
+    input: ["text", "image"],
+    contextWindow: 1050000,
+    maxTokens: 128000,
+    cost: {
+      input: 8,
+      output: 40,
+      cacheRead: 0.4,
+      cacheWrite: 10,
+      tiers: [{ inputTokensAbove: 272000, input: 16, output: 60, cacheRead: 0.8, cacheWrite: 20 }],
+    },
+    compat: {
+      supportsStrictMode: true,
+      supportsOpenAIGrammarTools: true,
+      supportsAdditionalTools: true,
+      supportsToolSearch: true,
+    },
+  },
+  {
+    id: "gpt-6.2-sol",
+    name: "GPT-6.2 Sol",
+    api: "openai-responses",
+    provider: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    reasoning: true,
+    thinkingLevelMap: { off: null, minimal: "low", xhigh: "xhigh", max: "max" },
+    input: ["text", "image"],
+    contextWindow: 1050000,
+    maxTokens: 128000,
+    cost: {
+      input: 2,
+      output: 10,
+      cacheRead: 0.1,
+      cacheWrite: 2.5,
+      tiers: [{ inputTokensAbove: 272000, input: 4, output: 15, cacheRead: 0.2, cacheWrite: 5 }],
+    },
+    compat: {
+      supportsStrictMode: true,
+      supportsOpenAIGrammarTools: true,
+      supportsAdditionalTools: true,
+      supportsToolSearch: true,
+    },
+  },
+];
+
+export const OPENAI_MODEL_FALLBACKS = [
+  OPENAI_TERRA_MODEL,
+  OPENAI_CYBER_MODEL,
+  ...OPENAI_GPT_62_MODELS,
+];
+
 export function withOpenAIModels(builtIn: Provider): Provider {
   const appendMissing = <T extends { id: string; type?: string }>(
     models: readonly T[],
   ): readonly (T | Model<"openai-responses">)[] => {
-    const missing = [OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL].filter(
+    const missing = OPENAI_MODEL_FALLBACKS.filter(
       (fallback) =>
         !models.some((model) => model.id === fallback.id && (!model.type || model.type === "chat")),
     );

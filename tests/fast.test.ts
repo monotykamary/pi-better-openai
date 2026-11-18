@@ -131,6 +131,80 @@ afterEach(() => {
 });
 
 describe("service tiers", () => {
+  test.each(
+    ["openai", "openai-codex"].flatMap((provider) =>
+      ["gpt-6.2-astra", "gpt-6.2-sol"].map((id) => ({ provider, id })),
+    ),
+  )("enables GPT-6.2 Fast by default for $provider/$id", async ({ provider, id }) => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, { serviceTier: "fast", supportedModels: undefined });
+    const h = createHarness(cwd, createModel(provider, id));
+    await emit(h, "session_start");
+    expect(await beforeProviderRequest(h, { model: id })).toEqual({
+      model: id,
+      service_tier: "priority",
+    });
+  });
+
+  test.each(
+    ["gpt-6.2-astra", "gpt-6.2-sol"].flatMap((id) =>
+      ["https://api.openai.com/v1", "https://us.api.openai.com/v1/"].map((baseUrl) => ({
+        id,
+        baseUrl,
+      })),
+    ),
+  )("supports GPT-6.2 Ultrafast for $id at $baseUrl", async ({ id, baseUrl }) => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, { serviceTier: "standard" });
+    const h = createHarness(cwd, { ...createModel("openai", id)!, baseUrl });
+    await emit(h, "session_start");
+    await h.commands.get("openai-tier")!.handler("ultrafast", h.ctx);
+    expect(h.ctx.ui.notify).toHaveBeenLastCalledWith(
+      expect.stringContaining("3x through February 28, 2027"),
+      "warning",
+    );
+    const payload = { model: id, input: [] };
+    expect(await beforeProviderRequest(h, payload)).toEqual({
+      ...payload,
+      service_tier: "ultrafast",
+    });
+    expect(payload).not.toHaveProperty("service_tier");
+    expect(await beforeProviderRequest(h, { model: "gpt-6.1-terra" })).toBeUndefined();
+    vi.mocked(h.ctx.modelRegistry.isUsingOAuth).mockReturnValue(true);
+    expect(await beforeProviderRequest(h, payload)).toEqual({
+      ...payload,
+      service_tier: "ultrafast",
+    });
+  });
+
+  test.each(
+    ["gpt-6.2-astra", "gpt-6.2-sol"].flatMap((id) => [
+      { provider: "openai-codex", id },
+      ...[
+        "https://eu.api.openai.com/v1",
+        "https://ae.api.openai.com/v1",
+        "https://proxy.example/v1",
+        "http://api.openai.com/v1",
+        "https://api.openai.com/v1?route=other",
+        "https://api.openai.com/v1#other",
+        "https://user@api.openai.com/v1",
+        "https://api.openai.com:8443/v1",
+        "https://api.openai.com/v2",
+      ].map((baseUrl) => ({ provider: "openai", id, baseUrl })),
+      { provider: "openai", id, api: "openai-completions" },
+    ]),
+  )("keeps unsupported GPT-6.2 Ultrafast requests inactive: %j", async (overrides) => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, { serviceTier: "ultrafast", supportedModels: undefined });
+    const h = createHarness(cwd, {
+      ...createModel(overrides.provider, overrides.id)!,
+      ...overrides,
+    } as NonNullable<ExtensionContext["model"]>);
+    await emit(h, "session_start");
+    expect(await beforeProviderRequest(h, { model: overrides.id })).toBeUndefined();
+    expect(readRawConfig(configPaths(cwd).project).serviceTier).toBe("ultrafast");
+  });
+
   test.each(["fast", "ultrafast"])(
     "does not inject an unverified %s tier for GPT-6 Cyber",
     async (serviceTier) => {
@@ -276,7 +350,7 @@ describe("service tiers", () => {
     });
   });
 
-  test.each(["gpt-6-astra", "gpt-6.1-sol"])(
+  test.each(["gpt-6-astra", "gpt-6.1-sol", "gpt-6.2-astra", "gpt-6.2-sol"])(
     "subscription %s selects Ultrafast without extra settings or warnings",
     async (id) => {
       const cwd = createTempProject();

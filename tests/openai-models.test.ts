@@ -2,7 +2,12 @@ import { createModels, InMemoryCredentialStore, type Provider } from "@earendil-
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test, vi } from "vitest";
-import { OPENAI_CYBER_MODEL, OPENAI_TERRA_MODEL, withOpenAIModels } from "../src/openai-models.ts";
+import {
+  OPENAI_CYBER_MODEL,
+  OPENAI_TERRA_MODEL,
+  OPENAI_MODEL_FALLBACKS,
+  withOpenAIModels,
+} from "../src/openai-models.ts";
 import {
   OPENAI_DECISIONS_MODEL,
   registerOpenAIDecisionsProvider,
@@ -59,7 +64,7 @@ describe("GPT-6 Cyber", () => {
     const base = native();
     const classifier = { ...OPENAI_DECISIONS_MODEL, id: OPENAI_CYBER_MODEL.id };
     const provider = withOpenAIModels({ ...base, getAllModels: () => [classifier] });
-    expect(provider.getAllModels!()).toEqual([classifier, OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL]);
+    expect(provider.getAllModels!()).toEqual([classifier, ...OPENAI_MODEL_FALLBACKS]);
   });
 
   test.each(["api_key", "oauth"] as const)(
@@ -126,8 +131,8 @@ describe("GPT-6.1 Terra", () => {
     let chat = base.getModels().filter((model) => model.id !== OPENAI_TERRA_MODEL.id);
     let all = base.getAllModels!().filter((model) => model.id !== OPENAI_TERRA_MODEL.id);
     const provider = withOpenAIModels({ ...base, getModels: () => chat, getAllModels: () => all });
-    expect(provider.getModels()).toEqual([...chat, OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL]);
-    expect(provider.getAllModels!()).toEqual([...all, OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL]);
+    expect(provider.getModels()).toEqual([...chat, ...OPENAI_MODEL_FALLBACKS]);
+    expect(provider.getAllModels!()).toEqual([...all, ...OPENAI_MODEL_FALLBACKS]);
     for (const key of [
       "auth",
       "stream",
@@ -153,7 +158,7 @@ describe("GPT-6.1 Terra", () => {
     const base = native();
     const classifier = { ...OPENAI_DECISIONS_MODEL, id: OPENAI_TERRA_MODEL.id };
     const provider = withOpenAIModels({ ...base, getAllModels: () => [classifier] });
-    expect(provider.getAllModels!()).toEqual([classifier, OPENAI_TERRA_MODEL, OPENAI_CYBER_MODEL]);
+    expect(provider.getAllModels!()).toEqual([classifier, ...OPENAI_MODEL_FALLBACKS]);
   });
 
   test("registers Terra alongside Decisions and makes it available with subscription auth", async () => {

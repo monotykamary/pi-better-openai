@@ -60,7 +60,7 @@ Do **not** use `--api-key` for this split: it would switch the selected chat pro
 
 ## Features
 
-- GPT-6.1 Sol, GPT-6 Astra, and Daybreak Blue/Red model fallbacks for the built-in `openai-codex` provider.
+- GPT-6.2 Astra/Sol model fallbacks for native `openai` and legacy `openai-codex`, alongside existing Terra, Astra, Sol, and Daybreak models.
 - Standard, Fast, and capability-gated Ultrafast service tiers via `/openai-tier` or `/openai-settings`.
 - Native OpenAI Decisions (`openai-decisions/gpt-6-luna` for separate API billing, or `openai/gpt-6-luna`) through Pi's classifier API, codemode, and pi-fabric; optional bounded `openai_decide` tool also supports Jev.
 - OpenAI subscription usage display via `/openai-usage` and the footer.
@@ -177,7 +177,7 @@ Setting `image.enabled`, `websearch.enabled`, or `decisions.enabled` to `false` 
 
 `/openai-tier fast` requests `service_tier: "priority"`. `/openai-tier standard` explicitly requests `"default"`, clearing an inherited Fast/Ultrafast request tier on OpenAI providers. Legacy disabled configurations without an explicit tier leave payloads untouched. The legacy `/fast` command and `--fast` flag have been removed; use `/openai-tier fast` or `/openai-tier standard` instead.
 
-`/openai-tier ultrafast` explicitly opts into **6x Standard token prices** for **API-key-authenticated** `openai/gpt-6-astra` and `openai/gpt-6.1-sol` over the Responses API. Both support the documented global (`https://api.openai.com/v1`) and US (`https://us.api.openai.com/v1`) endpoints. Sol also supports the EU endpoint (`https://eu.api.openai.com/v1`); Astra does not. Other regional endpoints, custom proxies, other models, and legacy `openai-codex` remain unsupported. OpenAI subscription OAuth can request Ultrafast directly with the same command, without a separate setting or plan check. This does not promise account entitlement or available rate limits. Unsupported selections remain requested but inactive; the extension does not inject a lower-tier fallback or retry a rejected request.
+`/openai-tier ultrafast` explicitly opts into premium API pricing over the Responses API. Supported models are `openai/gpt-6.2-astra`, `openai/gpt-6.2-sol`, `openai/gpt-6-astra`, and `openai/gpt-6.1-sol`. GPT-6.2 Astra/Sol cost **3x Standard through February 28, 2027**, then **6x starting March 1, 2027 (Pacific time)**; the older models cost **6x Standard**. All four support the documented global (`https://api.openai.com/v1`) and US (`https://us.api.openai.com/v1`) endpoints. Only GPT-6.1 Sol also supports the EU endpoint (`https://eu.api.openai.com/v1`); GPT-6.2 Ultrafast is not available there. Other regional endpoints, custom proxies, other models, and legacy `openai-codex` remain unsupported. OpenAI subscription OAuth can request Ultrafast directly with the same command, without a separate setting or plan check. This does not promise account entitlement or available rate limits. Unsupported selections remain requested but inactive; the extension does not inject a lower-tier fallback or retry a rejected request.
 
 For subscription OAuth, just run `/openai-tier ultrafast`. There is no additional opt-in, plan-price check, or subscription warning. OpenAI determines account entitlement and whether to honor the requested tier. Responses may report `default` even when measured throughput is faster; requesting a tier does not guarantee acceleration or a particular billing treatment. Rejected requests are not automatically retried at another tier.
 
@@ -252,6 +252,31 @@ Example tool input:
 - Probabilities and confidence remain uncertain judgments; scores retain their provider-specific scale. No claim of cross-provider calibration is made. Decisions never authorize tools, execute commands, change the active model, or start background polling.
 - Reported classifier token usage/cost is included in tool results and the Better OpenAI footer. Missing usage or catalog pricing is not evidence that a request was free.
 
+## GPT-6.2 Astra and Sol
+
+[OpenAI's announcement](https://openai.com/index/introducing-gpt-6-2-astra-sol/) introduces `gpt-6.2-astra` and `gpt-6.2-sol`. Reload the extension and select either model using your existing OpenAI login:
+
+```text
+/reload
+/model openai/gpt-6.2-astra
+/model openai/gpt-6.2-sol
+```
+
+The extension supplies missing entries without replacing native authentication, Responses transport, classifiers, or host catalog metadata. Both models accept text/images, with a 1.05M context window and 128K maximum output. `off` is disabled because `none` is rejected; Pi's `minimal` maps to `low`.
+
+Published Standard prices per million tokens ([Astra](https://developers.openai.com/api/docs/models/gpt-6.2-astra), [Sol](https://developers.openai.com/api/docs/models/gpt-6.2-sol)):
+
+| Model         | Input | Output | Cached input | Cache write (30m) |
+| ------------- | ----: | -----: | -----------: | ----------------: |
+| GPT-6.2 Astra |    $8 |    $40 |        $0.40 |               $10 |
+| GPT-6.2 Sol   |    $2 |    $10 |        $0.10 |             $2.50 |
+
+Above 272K input tokens, input/cache rates double and output rates increase by 1.5x for the full request. Fast is included in the default allowlist; existing customized model lists remain unchanged. Ultrafast supports only the global/US OpenAI Responses endpoints for these models; see [Service tiers](#service-tiers) for promotional pricing and limitations.
+
+Legacy `openai-codex/gpt-6.2-astra` and `openai-codex/gpt-6.2-sol` entries use a conservative 272K context fallback until authoritative Codex metadata is available. They need their own `/login openai-codex` and do not enable Ultrafast. Catalog registration does not establish account entitlement; these entries are covered by offline regression tests, not a successful live generation test.
+
+GPT-6.2 can discard persisted reasoning after edits to conversation history. Follow the [migration guide](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6.2-astra): preserve the conversation prefix and append new instructions rather than rewriting prior messages.
+
 ## GPT-6 Cyber
 
 The official model ID is **`gpt-6-cyber`**, exposed here as **`openai/gpt-6-cyber`**. After reloading the extension, select it with:
@@ -279,7 +304,7 @@ The [GPT-6.1 Terra model documentation](https://developers.openai.com/api/docs/m
 
 The legacy `/model openai-codex/gpt-6.1-terra` fallback uses a conservative 272K context window until the host publishes Codex-specific metadata. It requires its own `/login openai-codex`; a successful direct OpenAI subscription request does not verify Codex entitlement. Other chat fallbacks below remain scoped to that legacy provider.
 
-The extension adds `gpt-6.1-terra`, `gpt-6.1-sol`, `gpt-6-astra`, `gpt-daybreak-blue-latest`, and `gpt-daybreak-red-latest` to the built-in `openai-codex` provider without requiring local `models.json` entries. Existing built-in models remain available, and metadata from pi's live catalog takes precedence when pi publishes an official entry with the same ID.
+The extension adds `gpt-6.2-astra`, `gpt-6.2-sol`, `gpt-6.1-terra`, `gpt-6.1-sol`, `gpt-6-astra`, `gpt-daybreak-blue-latest`, and `gpt-daybreak-red-latest` to the built-in `openai-codex` provider without requiring local `models.json` entries. Existing built-in models remain available, and metadata from pi's live catalog takes precedence when pi publishes an official entry with the same ID.
 
 The GPT-6.1 Sol fallback uses Codex's conservative 272K context default, 128K output limit, and published short/long-context pricing. It maps Pi's `minimal` level to `low` and disables `off`; the model does not accept `none` or `minimal` reasoning efforts. See [model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol) and the [upstream Codex catalog change](https://github.com/openai/codex/commit/b1e72963c3b71a9265a551e54beff078384efed9).
 
