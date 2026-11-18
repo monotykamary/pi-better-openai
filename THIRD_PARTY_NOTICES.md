@@ -1,5 +1,9 @@
 # Third-party notices
 
+## picomatch security patch
+
+`patches/picomatch@4.0.7.patch` modifies [picomatch](https://github.com/micromatch/picomatch) 4.0.7. Upstream is MIT-licensed, copyright (c) 2017-present Jon Schlinkert. Its original license is retained in the installed package. See `patches/README.md` for the advisory, compatibility restriction, verification, and removal criteria.
+
 ## Pi
 
 `src/openai-decisions.ts` adapts the wire mapping, classifier contract, model metadata, and HTTP behavior from [`earendil-works/pi`](https://github.com/earendil-works/pi), notably `packages/ai/src/api/openai-decisions.ts`, `classifier-shared.ts`, and the classifier tests.

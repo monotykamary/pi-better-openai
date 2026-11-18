@@ -1,0 +1,29 @@
+diff --git a/lib/parse.js b/lib/parse.js
+index 2920751..6a3215b 100644
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -285,6 +285,15 @@ const repeatedExtglobRecursion = pattern => {
+ };
+ 
+ const analyzeRepeatedExtglob = (body, options) => {
++  const branches = splitTopLevel(body).map(branch => branch.trim());
++
++  // BEGIN GHSA-fc5q-39xc-vjpf: fail closed for complex single-branch repetition.
++  // Even with the recursion safeguard disabled, never emit nested quantifiers.
++  if (branches.length === 1 && !normalizeSimpleBranch(branches[0])) {
++    return { risky: true };
++  }
++  // END GHSA-fc5q-39xc-vjpf
++
+   if (options.maxExtglobRecursion === false) {
+     return { risky: false };
+   }
+@@ -294,8 +303,6 @@ const analyzeRepeatedExtglob = (body, options) => {
+       ? options.maxExtglobRecursion
+       : constants.DEFAULT_MAX_EXTGLOB_RECURSION;
+ 
+-  const branches = splitTopLevel(body).map(branch => branch.trim());
+-
+   if (branches.length > 1) {
+     if (
+       branches.some(branch => branch === '') ||

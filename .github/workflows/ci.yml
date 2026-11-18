@@ -36,4 +36,4 @@ jobs:
         run: bun run test:pi
 
       - name: Run high-severity audit
-        run: bun audit --audit-level=high
+        run: bun run audit

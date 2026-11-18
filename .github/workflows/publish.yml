@@ -84,6 +84,10 @@ jobs:
         if: steps.release.outputs.mode != 'skip'
         run: bun run check
 
+      - name: Audit with verified local security patches
+        if: steps.release.outputs.mode != 'skip'
+        run: bun run audit
+
       - name: Pack
         if: steps.release.outputs.mode != 'skip'
         run: |

@@ -48,7 +48,7 @@ jobs:
         run: bun run check
 
       - name: Run high-severity audit
-        run: bun audit --audit-level=high
+        run: bun run audit
 
       - name: Publish package
         run: npm publish

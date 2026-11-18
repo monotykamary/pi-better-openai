@@ -40,6 +40,7 @@
     "README.md",
     "CHANGELOG.md",
     "plans/devday-integration.md",
+    "patches/",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
@@ -48,6 +49,7 @@
     "access": "public"
   },
   "scripts": {
+    "audit": "node scripts/audit.mjs",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
@@ -73,6 +75,7 @@
     "@types/ws": "8.18.1",
     "oxfmt": "^0.47.0",
     "oxlint": "^1.62.0",
+    "picomatch": "4.0.7",
     "typebox": "^1.0.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
@@ -95,6 +98,7 @@
     "@earendil-works/pi-ai": "1.5.0",
     "brace-expansion": "5.0.12",
     "nanoid": "3.3.18",
+    "picomatch": "4.0.7",
     "postcss": "8.5.25",
     "protobufjs": "7.6.5",
     "source-map-js": "1.2.2",
@@ -104,6 +108,9 @@
   },
   "engines": {
     "node": ">=22.19.0"
+  },
+  "patchedDependencies": {
+    "picomatch@4.0.7": "patches/picomatch@4.0.7.patch"
   },
   "pi": {
     "extensions": [
