@@ -1,6 +1,6 @@
 {
   "name": "@monotykamary/pi-better-openai",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Improve OpenAI in pi with fast mode, usage stats, realtime voice, image generation, and footer polish.",
   "keywords": [
     "fast",
