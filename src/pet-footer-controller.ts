@@ -110,7 +110,7 @@ export class PetFooterController {
   private stdoutResizeHandler: (() => void) | undefined;
   private petAnimationState: PetState | undefined;
   private petAnimationStartedAt = Date.now();
-  private readonly petRenderCache = new Map<string, string[]>();
+  private readonly petRenderCache = new Map<string, readonly string[]>();
   private readonly activeToolCallIds = new Set<string>();
   private readonly petImageId = 0x70657401;
   private readonly petKittyManager = new CodexPetKittyManager(this.petImageId);
@@ -237,7 +237,7 @@ export class PetFooterController {
     this.writeKittySequence(this.petKittyManager.dispose(target));
   }
 
-  private rememberRender(key: string, lines: string[]): void {
+  private rememberRender(key: string, lines: readonly string[]): void {
     this.petRenderCache.set(key, lines);
     while (this.petRenderCache.size > PET_RENDER_CACHE_LIMIT) {
       const firstKey = this.petRenderCache.keys().next().value;
@@ -246,7 +246,7 @@ export class PetFooterController {
     }
   }
 
-  private recallRender(key: string): string[] | undefined {
+  private recallRender(key: string): readonly string[] | undefined {
     const lines = this.petRenderCache.get(key);
     if (!lines) return undefined;
     this.petRenderCache.delete(key);

@@ -27,8 +27,12 @@ try {
     SettingsManager,
     VERSION,
   } = await import("@earendil-works/pi-coding-agent");
-  assert.equal(VERSION, "1.5.0", "test the actual pinned Pi host, not a stale override");
   const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  assert.equal(
+    VERSION,
+    manifest.devDependencies["@earendil-works/pi-coding-agent"],
+    "test the actual pinned Pi host, not a stale override",
+  );
   for (const name of [
     "@earendil-works/pi-ai",
     "@earendil-works/pi-agent-core",
@@ -109,7 +113,7 @@ try {
     ["use openai-decisions/gpt-6-luna"],
   );
   assert.equal(modelRuntime.getProvider("openai")?.auth?.oauth?.isSubscription, true);
-  assert.match(modelRuntime.getProvider("openai-codex")?.name ?? "", /legacy/i);
+  assert.equal(modelRuntime.getProvider("openai-codex")?.name, "OpenAI Codex");
   const decisionsModel = modelRuntime.getModelOfType("classifier", "openai", "gpt-6-luna");
   assert.equal(decisionsModel?.api, "openai-decisions");
   assert.deepEqual(

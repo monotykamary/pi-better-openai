@@ -794,7 +794,7 @@ export function renderCodexPetFrame(
     durationMultiplier?: number;
     kittyManager?: CodexPetKittyManager;
   },
-): string[] {
+): readonly string[] {
   const frame = animationFrameAt(
     pet.states[state] ?? pet.states.idle,
     options.now,

@@ -297,8 +297,10 @@ export class LiveFloorArbiter implements LiveFloorArbiterLike {
 
   #evaluate(): void {
     const now = this.#now();
-    const aliveMembers = this.#readMembers().filter((member) => this.#isMemberAlive(member));
+    // Join publishes membership before claiming. Read the claim first so a
+    // contender cannot pair a new claim with an older membership snapshot.
     const claim = this.#readClaim();
+    const aliveMembers = this.#readMembers().filter((member) => this.#isMemberAlive(member));
     const holderAlive =
       claim !== undefined &&
       (claim.pid === this.#pid || this.#isProcessAlive(claim.pid)) &&

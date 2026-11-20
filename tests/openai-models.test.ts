@@ -131,8 +131,12 @@ describe("GPT-6.1 Terra", () => {
     let chat = base.getModels().filter((model) => model.id !== OPENAI_TERRA_MODEL.id);
     let all = base.getAllModels!().filter((model) => model.id !== OPENAI_TERRA_MODEL.id);
     const provider = withOpenAIModels({ ...base, getModels: () => chat, getAllModels: () => all });
-    expect(provider.getModels()).toEqual([...chat, ...OPENAI_MODEL_FALLBACKS]);
-    expect(provider.getAllModels!()).toEqual([...all, ...OPENAI_MODEL_FALLBACKS]);
+    // Pi 1.6 provides GPT-6.2 models natively. Supply only missing entries,
+    // without replacing their authoritative metadata with older fallbacks.
+    const missingFrom = (models: readonly { id: string }[]) =>
+      OPENAI_MODEL_FALLBACKS.filter((fallback) => !models.some(({ id }) => id === fallback.id));
+    expect(provider.getModels()).toEqual([...chat, ...missingFrom(chat)]);
+    expect(provider.getAllModels!()).toEqual([...all, ...missingFrom(all)]);
     for (const key of [
       "auth",
       "stream",

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.11
+
+- Keep Codex pet image rendering compatible with Pi 1.6’s read-only TUI rows.
+- Align the SDK overrides with Pi 1.6 and update Undici to 8.12.4.
+
 ## 0.3.8
 
 - Patch picomatch 4.0.7 against single-branch repeated-extglob ReDoS (GHSA-fc5q-39xc-vjpf), with bounded regression tests and source-hash verification before the advisory-specific audit exception. All other high-severity findings remain release blockers.
